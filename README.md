@@ -1,5 +1,5 @@
 # hif_2_jpeg_with_gainmaps
-A rust program that maps a sony hif file to a jpg with gain maps
+This is a PURE rust program that maps a sony hif file to a jpg with gain maps
 This program is still in development. The intention is to add a gui in slint in which
 an HIF file can be selected and the intended output jpg file.  
 There will be two parameters: gain (usually <1) for the SDR and gain (usually 1 or larger) for the HDR
