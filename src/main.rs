@@ -18,14 +18,43 @@ pub mod transfer_functions;
 use create_jpeg_from_2_files::create_from_2_files;
 use create_jpeg_from_hdr::create_hdr_from_file;
 
-fn main() {
-    //create_from_2_files("wel.jpg", "niet.jpg", "totwell.jpg");
-    create_from_2_files(
-        "gainmappped_colorful.jpg",
-        "gainmapped_outline.jpg",
-        "gainmapped_rust3.jpg",
-    )
-    .unwrap();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
 
-    create_hdr_from_file("A6704110.HIF", 1.6, 1.0, "A6704110_a.jpg").unwrap();
+    let stack_jpegs = "stack-jpegs";
+    let transcode_hif = "transcode-hif";
+
+    match args.as_slice() {
+        [command] if command == "--help" || command == "-h" => {
+            print_usage(stack_jpegs, transcode_hif);
+        }
+        [command, hdr, sdr, output] if command == stack_jpegs => {
+            create_from_2_files(hdr, sdr, output)?;
+        }
+        [command, input, gain_hdr, gain_sdr, output] if command == transcode_hif => {
+            let gain_hdr: f32 = gain_hdr.parse()?;
+            let gain_sdr: f32 = gain_sdr.parse()?;
+            create_hdr_from_file(input, gain_hdr, gain_sdr, output)?;
+        }
+        [] => print_usage(stack_jpegs, transcode_hif),
+        _ => {
+            print_usage(stack_jpegs, transcode_hif);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid command or arguments; use --help for usage",
+            )
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+fn print_usage(stack: &str, hdr: &str) {
+    println!(
+        "Usage:\n  hif2jpeg {} <hdr.jpg> <sdr.jpg> <output.jpg>\n  \
+         hif2jpeg {} <input.hif> <gain_hdr> <gain_sdr> <output.jpg>\n\nExamples:\n \
+         hif2jpeg {} gainmappped_colorful.jpg gainmapped_outline.jpg gainmapped_rust3.jpg\n  \
+         hif2jpeg {} A6704110.HIF 1.6 1.0 A6704110_a.jpg", stack, hdr, stack, hdr
+    );
 }
