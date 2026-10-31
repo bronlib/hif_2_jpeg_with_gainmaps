@@ -1,19 +1,13 @@
 //! Gain map computation from HDR and SDR images.
 
-use std::cmp::{max, min};
-use std::fs;
+use enough::{Stop};
 
-use enough::{Stop, StopReason, Unstoppable};
-use std::time::Instant;
-use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig};
 use zenjpeg::ultrahdr::{
-    GainMap, GainMapMetadata, UhdrColorGamut, UhdrColorTransfer, UhdrPixelFormat, UhdrRawImage,
+    GainMap, GainMapMetadata,  UhdrPixelFormat, UhdrRawImage,
 };
 
-use crate::create_png::create_png;
 use zenjpeg::ultrahdr::GainMapConfig;
 
-use std::io::{Error, ErrorKind};
 use zenjpeg::ultrahdr::UhdrColorGamut::Bt2020;
 
 /// Compute a gain map from HDR and SDR images.
@@ -28,18 +22,10 @@ use zenjpeg::ultrahdr::UhdrColorGamut::Bt2020;
 /// sRGB OETF: Linear `[0,1]` → sRGB encoded `[0,1]`
 ///
 /// Delegates to `linear-srgb` (rational polynomial, ~5e-7 max error, no `powf`).
-#[inline]
-pub fn srgb_oetf(linear: f32) -> f32 {
-    0.0
-}
 
 /// sRGB EOTF (inverse OETF): sRGB encoded `[0,1]` → Linear `[0,1]`
 ///
 /// Delegates to `linear-srgb` (rational polynomial, ~5e-7 max error, no `powf`).
-#[inline]
-pub fn srgb_eotf(encoded: f32) -> f32 {
-    0.0
-}
 
 pub fn compute_mygainmap(
     hdr: &UhdrRawImage,
@@ -114,12 +100,6 @@ fn mycompute_multichannel_gainmap(
     stop: &impl Stop,
 ) -> Result<(GainMap, [f64; 3], [f64; 3]), Box<dyn std::error::Error>> {
     let mut gainmap = GainMap::new_multichannel(gm_width, gm_height)?;
-
-    let rec709_to_bt2020 = [
-        [0.627404, 0.329282, 0.043313],
-        [0.069097, 0.919541, 0.011362],
-        [0.016391, 0.055974, 0.927635],
-    ];
 
     let offset_sdr: [f32; 3] = [config.base_offset, config.base_offset, config.base_offset];
     let offset_hdr: [f32; 3] = [config.base_offset, config.base_offset, config.base_offset];
@@ -211,7 +191,7 @@ fn mycompute_multichannel_gainmap(
 /// When the `transfer` feature is disabled, only inherently linear formats
 /// (Rgba16F, Rgba32F) are supported. For encoded formats, the caller must
 /// pre-convert to linear using an external CMS.
-
+/*
 fn get_linear_rgb2(img: &UhdrRawImage, x: u32, y: u32) -> [f32; 3] {
     match img.format {
         UhdrPixelFormat::Rgba8 | UhdrPixelFormat::Rgb8 => {
@@ -281,12 +261,12 @@ fn get_linear_rgb2(img: &UhdrRawImage, x: u32, y: u32) -> [f32; 3] {
         _ => [0.0, 0.0, 0.0],
     }
 }
-
+*/
 /// Extract linear RGB from a raw image (no transfer feature).
 ///
 /// Only supports inherently linear formats (Rgba16F, Rgba32F).
 /// For encoded formats (sRGB, PQ, etc.), use an external CMS to pre-convert.
-#[cfg(not(feature = "transfer"))]
+//#[cfg(not(feature = "transfer"))]
 fn get_linear_rgb(img: &UhdrRawImage, x: u32, y: u32) -> [f32; 3] {
     match img.format {
         UhdrPixelFormat::Rgba16F => {

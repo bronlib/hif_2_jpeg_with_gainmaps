@@ -1,11 +1,7 @@
-use oxideav_pixfmt::transfer::{bt709_inverse_oetf, bt1886_inverse_eotf};
 
 use ultrahdr_core::{ColorTransfer, RawImage};
-use zenjpeg::ultrahdr::{UhdrColorGamut, UhdrPixelFormat};
+use zenjpeg::ultrahdr::{UhdrPixelFormat};
 
-pub(crate) fn bt1886_inverse_eotf_vec(input: &[f32]) -> Vec<f32> {
-    input.iter().map(|&l| bt1886_inverse_eotf(l)).collect()
-}
 pub fn apply_transfer_vec<F>(input: &[f32], f: F) -> Vec<f32>
 where
     F: Fn(f32) -> f32,

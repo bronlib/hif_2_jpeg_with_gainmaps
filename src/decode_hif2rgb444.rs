@@ -4,7 +4,6 @@ use std::fs;
 use crate::color_spaces::bt2020_yuv_to_rgb_wide16;
 use crate::filters::upsample_420;
 use crate::filters::upsample_422;
-use crate::hlg::hlg_eotf;
 use crate::hlg::hlg_eotf_wide16;
 
 pub(crate) fn decode_heif2yuv_e_domain(

@@ -1,4 +1,4 @@
-use std::time::Instant;
+
 use wide::f32x16;
 
 macro_rules! load_n {
@@ -24,37 +24,6 @@ macro_rules! store_n {
     }};
 }
 
-pub fn mul_vec_scalar_wide16(v: &mut [f32], k: f32) {
-    const LANES: usize = 16;
-
-    let n = v.len();
-    let simd_chunks = n / LANES;
-    let remainder = n % LANES;
-
-    let vk = f32x16::splat(k);
-
-    for chunk in 0..simd_chunks {
-        let i = chunk * LANES;
-
-        let vv = f32x16::new(load_n!(v, i, LANES));
-        let vr = vv * vk;
-
-        store_n!(vr, v, i, LANES);
-    }
-
-    if remainder > 0 {
-        let start = simd_chunks * LANES;
-        for i in start..n {
-            v[i] *= k;
-        }
-    }
-}
-
-pub fn mul_vec_scalar(v: &mut [f32], k: f32) {
-    for x in v.iter_mut() {
-        *x *= k;
-    }
-}
 
 pub(crate) fn mul_vec_scalar_new_wide16(b_in: &[f32], k: f32) -> Vec<f32> {
     const LANES: usize = 16;

@@ -6,66 +6,16 @@ use std::time::Instant;
 use ultrahdr_core::{GainMapEncodingFormat, RawImage};
 use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig};
 use zenjpeg::ultrahdr::{
-    GainMap, GainMapConfig, UhdrColorGamut, UhdrColorTransfer, UhdrPixelFormat, UhdrRawImage,
-    compute_gainmap, encode_with_gainmap, encode_with_gainmap_format, generate_gainmap_xmp,
+    GainMapConfig, UhdrColorGamut, UhdrColorTransfer, UhdrPixelFormat, UhdrRawImage,
+    encode_with_gainmap_format
 };
 
-use crate::color_transform::bt2020_to_bt709;
-use crate::create_jpeg_from_hdr::create_hdr_from_file;
+use crate::color_transform::{bt2020_to_bt709, bt709_to_bt2020 };
 use crate::gain_mapping::compute_mygainmap;
 use crate::gainmap_jpeg_fix::{add_iso21496_to_xmp_ultrahdr, linear_bt2020_icc_profile};
 use crate::transfer_functions::apply_transfer;
-use oxideav_pixfmt::transfer::{bt709_inverse_oetf, bt1886_inverse_eotf};
-use zenjpeg::decoder::{DecodedImage, Decoder};
-
-fn get_linear_rgb(img: &UhdrRawImage, x: u32, y: u32) -> [f32; 3] {
-    match img.format {
-        UhdrPixelFormat::Rgba8 | UhdrPixelFormat::Rgb8 => {
-            let bpp = if img.format == UhdrPixelFormat::Rgba8 {
-                4
-            } else {
-                3
-            };
-            let idx = (y * img.stride + x * bpp as u32) as usize;
-            let r = img.data[idx] as f32 / 255.0;
-            let g = img.data[idx + 1] as f32 / 255.0;
-            let b = img.data[idx + 2] as f32 / 255.0;
-
-            // Apply EOTF based on transfer function
-            match img.transfer {
-                UhdrColorTransfer::Linear => [r, g, b],
-                _ => [r, g, b], // Assume sRGB for 8-bit
-            }
-        }
-
-        UhdrPixelFormat::Rgba32F => {
-            let idx = (y * img.stride + x * 16) as usize;
-            let r = f32::from_le_bytes([
-                img.data[idx],
-                img.data[idx + 1],
-                img.data[idx + 2],
-                img.data[idx + 3],
-            ]);
-            let g = f32::from_le_bytes([
-                img.data[idx + 4],
-                img.data[idx + 5],
-                img.data[idx + 6],
-                img.data[idx + 7],
-            ]);
-            let b = f32::from_le_bytes([
-                img.data[idx + 8],
-                img.data[idx + 9],
-                img.data[idx + 10],
-                img.data[idx + 11],
-            ]);
-            [r, g, b]
-        }
-        _ => {
-            println!("unknown format");
-            [0.0, 0.0, 0.0]
-        }
-    }
-}
+use oxideav_pixfmt::transfer::{ bt1886_inverse_eotf};
+use zenjpeg::decoder::{ Decoder};
 
 struct MyStop {
     stop: bool,
@@ -115,33 +65,13 @@ fn get_pixels_rgb32f(file: &str) -> UhdrRawImage {
     )
     .unwrap()
 }
-fn get_pixels_rgb8(file: &str) -> UhdrRawImage {
-    let jpeg_data = fs::read(file).unwrap();
 
-    let decoded = Decoder::new().decode(&jpeg_data, Unstoppable).unwrap();
-
-    let width = decoded.width;
-    let height = decoded.height;
-
-    let rgb: Vec<u8> = decoded.pixels_u8().expect("Expected 8-bit image").to_vec();
-
-    UhdrRawImage::from_data(
-        width,
-        height,
-        UhdrPixelFormat::Rgb8,
-        UhdrColorGamut::Bt2020,
-        UhdrColorTransfer::Linear,
-        rgb,
-    )
-    .unwrap()
-}
 
 pub(crate) fn create_from_2_files(
     hdr_file: &str,
     sdr_file: &str,
     to_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let total_start = Instant::now();
     println!(
         "create_from_2_file {}, {} to file {}",
         hdr_file, sdr_file, to_file
@@ -161,6 +91,14 @@ pub(crate) fn create_from_2_raw(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let total_start = Instant::now();
     println!("create_from_2_raw : to file {}", to_file);
+    assert_eq!(sdr.gamut, UhdrColorGamut::Bt2020);
+    /*
+    Reduce the gammut so that the gainmap will include the
+    information needed to restore the full 2020 gamut of the
+    original picture
+     */
+    let sdr709=bt2020_to_bt709(&sdr);
+    let sdr2020 = bt709_to_bt2020(&sdr709);
 
     let stop = MyStop { stop: false };
 
@@ -175,10 +113,10 @@ pub(crate) fn create_from_2_raw(
     gainmap_config.base_hdr_headroom = 0.0;
     gainmap_config.alternate_hdr_headroom = 3.0;
 
-    let (gainmap, metadata) = compute_mygainmap(&hdr, &sdr, &gainmap_config, &stop).unwrap();
+    let (gainmap, metadata) = compute_mygainmap(&hdr, &sdr2020, &gainmap_config, &stop).unwrap();
     //stop.check();
 
-    let sdr_709 = bt2020_to_bt709(&sdr);
+    let sdr_709 = bt2020_to_bt709(&sdr2020);
     let sdr_e = apply_transfer(&sdr_709, &bt1886_inverse_eotf);
     let sdr_8 = rgba32f_to_rgb8(&sdr_e);
 
@@ -295,53 +233,6 @@ pub(crate) fn encodemy_zen(
     .unwrap();
 
     create_from_2_raw(hdr, sdr, &to_file).unwrap();
-}
-
-fn linear_bt2020_to_rgb8(
-    width: u32,
-    height: u32,
-    r_sdr: &[f32],
-    g_sdr: &[f32],
-    b_sdr: &[f32],
-) -> UhdrRawImage {
-    fn linear_to_srgb_u8(v: f32) -> u8 {
-        let v = v.clamp(0.0, 1.0);
-
-        let srgb = if v <= 0.0031308 {
-            12.92 * v
-        } else {
-            1.055 * v.powf(1.0 / 2.4) - 0.055
-        };
-
-        (srgb * 255.0 + 0.5) as u8
-    }
-
-    let mut rgb8 = Vec::with_capacity(r_sdr.len() * 3);
-
-    for i in 0..r_sdr.len() {
-        let r = r_sdr[i];
-        let g = g_sdr[i];
-        let b = b_sdr[i];
-
-        // BT.2020 linear -> BT.709 linear
-        let r709 = 1.6605 * r - 0.5876 * g - 0.0728 * b;
-        let g709 = -0.1246 * r + 1.1329 * g - 0.0083 * b;
-        let b709 = -0.0182 * r - 0.1006 * g + 1.1187 * b;
-
-        rgb8.push(linear_to_srgb_u8(r709));
-        rgb8.push(linear_to_srgb_u8(g709));
-        rgb8.push(linear_to_srgb_u8(b709));
-    }
-
-    UhdrRawImage::from_data(
-        width,
-        height,
-        UhdrPixelFormat::Rgb8,
-        UhdrColorGamut::Bt2020,
-        UhdrColorTransfer::Linear,
-        rgb8,
-    )
-    .unwrap()
 }
 
 pub(crate) fn rgba32f_to_rgb8(image: &RawImage) -> RawImage {

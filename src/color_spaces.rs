@@ -79,28 +79,6 @@ pub(crate) fn bt2020_yuv_to_rgb(y: f32, cb: f32, cr: f32) -> (f32, f32, f32) {
     (r, g, b)
 }
 
-pub(crate) fn bt2020_yuv_to_rgb_vec(
-    y: &[f32],
-    cb: &[f32],
-    cr: &[f32],
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    assert_eq!(y.len(), cb.len());
-    assert_eq!(y.len(), cr.len());
-
-    let mut r = Vec::with_capacity(y.len());
-    let mut g = Vec::with_capacity(y.len());
-    let mut b = Vec::with_capacity(y.len());
-
-    for i in 0..y.len() {
-        let (rr, gg, bb) = bt2020_yuv_to_rgb(y[i], cb[i], cr[i]);
-        r.push(rr);
-        g.push(gg);
-        b.push(bb);
-    }
-
-    (r, g, b)
-}
-
 pub(crate) fn rgb_to_xyz_wide16(
     r_in: &[f32],
     g_in: &[f32],

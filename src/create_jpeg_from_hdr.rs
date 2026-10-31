@@ -1,19 +1,19 @@
 use crate::decode_hif2rgb444::decode_heif2rgb_o_domain;
 
-use crate::create_png::create_png;
 use std::time::Instant;
-use zenjpeg::ultrahdr::generate_gainmap_xmp;
 
 use crate::color_spaces::rgb_to_xyz_wide16;
 use crate::color_spaces::xyz_to_rgb_wide16;
 use crate::simd_multiply::mul_vec_scalar_new_wide16;
-use crate::simd_multiply::mul_vec_scalar_wide16;
 use crate::yuv_prime::{xyz_to_yuvprime_wide16, yuvprime_to_xyz_wide16};
 
 use crate::create_jpeg_from_2_files::encodemy_zen;
+use crate::hlg::{hlg_oetf_wide16, hlg_eotf_wide16};
 
 pub(crate) fn create_hdr_from_file(
     file: &str,
+    gain_hdr : f32,
+    gain_sdr : f32,
     to_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let total_start = Instant::now();
@@ -27,9 +27,16 @@ pub(crate) fn create_hdr_from_file(
     let (x, y, z) = rgb_to_xyz_wide16(&r, &g, &b);
 
     let (yy, uu, vv) = xyz_to_yuvprime_wide16(&x, &y, &z);
-
-    let ysdr = mul_vec_scalar_new_wide16(&yy, 1.0);
-    let yhdr = mul_vec_scalar_new_wide16(&yy, 1.6);
+    
+    let yy_oe = hlg_oetf_wide16(&yy);
+    
+    //Perform the multiplication in perceptually uniform space
+    let ysdr_e = mul_vec_scalar_new_wide16(&yy_oe, gain_sdr);
+    let yhdr_e = mul_vec_scalar_new_wide16(&yy_oe, gain_hdr);
+    
+    let ysdr = hlg_eotf_wide16(&ysdr_e);
+    let yhdr =hlg_eotf_wide16(&yhdr_e);
+    
 
     let (xxsdr, yysdr, zzsdr) = yuvprime_to_xyz_wide16(&ysdr, &uu, &vv);
     let (xxhdr, yyhdr, zzhdr) = yuvprime_to_xyz_wide16(&yhdr, &uu, &vv);

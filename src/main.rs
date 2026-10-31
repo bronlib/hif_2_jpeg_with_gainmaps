@@ -12,7 +12,7 @@ mod create_jpeg_from_hdr;
 pub mod enccode_decode;
 mod gain_mapping;
 mod gainmap_jpeg_fix;
-pub mod rgb2020_709;
+//pub mod rgb2020_709;
 pub mod transfer_functions;
 
 use create_jpeg_from_2_files::create_from_2_files;
@@ -26,5 +26,6 @@ fn main() {
         "gainmapped_rust3.jpg",
     )
     .unwrap();
-    //create_hdr_from_file("A6701459.HIF", "A6701459_a.jpg").unwrap();
+
+    create_hdr_from_file("A6704110.HIF", 1.6, 1.0, "A6704110_a.jpg").unwrap();
 }
