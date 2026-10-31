@@ -66,8 +66,8 @@ pub fn compute_mygainmap(
 
     // Clamp actual values to configured range
 
-    actual_min_boost = 0.0;
-    actual_max_boost = 2.0;
+    //actual_min_boost = 0.0;
+    //actual_max_boost = 2.0;
 
     // Build metadata (convert linear boost values to log2 domain)
     let mut metadata = GainMapMetadata::default();
@@ -188,85 +188,6 @@ fn mycompute_multichannel_gainmap(
     Ok((gainmap, maxlog, minlog))
 }
 
-/// Extract linear RGB `[0,1]` from a raw image at the given pixel position.
-///
-/// When the `transfer` feature is enabled, this function applies appropriate
-/// EOTF conversions (sRGB, PQ, HLG) based on the image's transfer function.
-///
-/// When the `transfer` feature is disabled, only inherently linear formats
-/// (Rgba16F, Rgba32F) are supported. For encoded formats, the caller must
-/// pre-convert to linear using an external CMS.
-/*
-fn get_linear_rgb2(img: &UhdrRawImage, x: u32, y: u32) -> [f32; 3] {
-    match img.format {
-        UhdrPixelFormat::Rgba8 | UhdrPixelFormat::Rgb8 => {
-            let bpp = if img.format == UhdrPixelFormat::Rgba8 {
-                4
-            } else {
-                3
-            };
-            let idx = (y * img.stride + x * bpp as u32) as usize;
-            let r = img.data[idx] as f32 / 255.0;
-            let g = img.data[idx + 1] as f32 / 255.0;
-            let b = img.data[idx + 2] as f32 / 255.0;
-
-            // Apply EOTF based on transfer function
-            match img.transfer {
-                UhdrColorTransfer::Srgb => [srgb_eotf(r), srgb_eotf(g), srgb_eotf(b)],
-                UhdrColorTransfer::Linear => [r, g, b],
-                _ => [srgb_eotf(r), srgb_eotf(g), srgb_eotf(b)], // Assume sRGB for 8-bit
-            }
-        }
-
-        UhdrPixelFormat::Rgba16F => {
-            let idx = (y * img.stride + x * 8) as usize;
-            let r = half_to_f32(&img.data[idx..idx + 2]);
-            let g = half_to_f32(&img.data[idx + 2..idx + 4]);
-            let b = half_to_f32(&img.data[idx + 4..idx + 6]);
-            [r, g, b]
-        }
-
-        UhdrPixelFormat::Rgba32F => {
-            let idx = (y * img.stride + x * 16) as usize;
-            let r = f32::from_le_bytes([
-                img.data[idx],
-                img.data[idx + 1],
-                img.data[idx + 2],
-                img.data[idx + 3],
-            ]);
-            let g = f32::from_le_bytes([
-                img.data[idx + 4],
-                img.data[idx + 5],
-                img.data[idx + 6],
-                img.data[idx + 7],
-            ]);
-            let b = f32::from_le_bytes([
-                img.data[idx + 8],
-                img.data[idx + 9],
-                img.data[idx + 10],
-                img.data[idx + 11],
-            ]);
-            [r, g, b]
-        }
-
-        UhdrPixelFormat::Rgba1010102Pq | UhdrPixelFormat::Rgba1010102Hlg => {
-            let idx = (y * img.stride + x * 4) as usize;
-            let packed = u32::from_le_bytes([
-                img.data[idx],
-                img.data[idx + 1],
-                img.data[idx + 2],
-                img.data[idx + 3],
-            ]);
-
-            let r = (packed & 0x3FF) as f32 / 1023.0;
-            let g = ((packed >> 10) & 0x3FF) as f32 / 1023.0;
-            let b = ((packed >> 20) & 0x3FF) as f32 / 1023.0;
-            [r, g, b]
-        }
-        _ => [0.0, 0.0, 0.0],
-    }
-}
-*/
 /// Extract linear RGB from a raw image (no transfer feature).
 ///
 /// Only supports inherently linear formats (Rgba16F, Rgba32F).

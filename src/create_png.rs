@@ -26,7 +26,7 @@ pub(crate) fn create_pngu8(
     img.save(name)?;
     Ok(())
 }
-
+/*
 pub(crate) fn create_png(
     name: &str,
     width: usize,
@@ -53,3 +53,4 @@ pub(crate) fn create_png(
     img.save(name)?;
     Ok(())
 }
+*/

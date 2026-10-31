@@ -71,14 +71,6 @@ pub fn bt2020_yuv_to_rgb_wide16(
     (r_out, g_out, b_out)
 }
 
-#[inline]
-pub(crate) fn bt2020_yuv_to_rgb(y: f32, cb: f32, cr: f32) -> (f32, f32, f32) {
-    let r = y + 1.4746 * cr;
-    let g = y - 0.16455 * cb - 0.57135 * cr;
-    let b = y + 1.8814 * cb;
-    (r, g, b)
-}
-
 pub(crate) fn rgb_to_xyz_wide16(
     r_in: &[f32],
     g_in: &[f32],
