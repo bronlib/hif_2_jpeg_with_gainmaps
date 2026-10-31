@@ -153,7 +153,6 @@ pub(crate) fn create_from_2_raw(
     let rgb = gainmap.data;
     let width = gainmap.width;
     let height = gainmap.height;
-    let len = rgb.len();
     let pixels = rgb.len() / 3;
     let mut r = Vec::with_capacity(pixels);
     let mut g = Vec::with_capacity(pixels);

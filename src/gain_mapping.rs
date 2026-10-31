@@ -101,6 +101,9 @@ fn mycompute_multichannel_gainmap(
 ) -> Result<(GainMap, [f64; 3], [f64; 3]), Box<dyn std::error::Error>> {
     let mut gainmap = GainMap::new_multichannel(gm_width, gm_height)?;
 
+    *actual_min_boost = 0.0;
+    *actual_max_boost = 2.0;
+
     let offset_sdr: [f32; 3] = [config.base_offset, config.base_offset, config.base_offset];
     let offset_hdr: [f32; 3] = [config.base_offset, config.base_offset, config.base_offset];
     let gamma: [f32; 3] = [config.gamma, config.gamma, config.gamma];
@@ -175,6 +178,8 @@ fn mycompute_multichannel_gainmap(
             }
         }
     }
+
+
     println!("max_log: {:?}", max_log);
     println!("min_log: {:?}", min_log);
     let maxlog: [f64; 3] = max_log.map(|x| x as f64);

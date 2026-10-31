@@ -37,7 +37,6 @@ pub(crate) fn hlg_eotf_wide16(e_in: &[f32]) -> Vec<f32> {
     let b = f32x16::splat(1.0f32 - 4.0f32 * 0.17883277f32);
     let c = f32x16::splat(0.5f32 - 0.17883277f32 * (4.0f32 * 0.17883277f32).ln());
 
-    let half = f32x16::splat(0.5f32);
     let three = f32x16::splat(3.0f32);
     let twelve = f32x16::splat(12.0f32);
 
