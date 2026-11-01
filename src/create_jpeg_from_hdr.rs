@@ -29,7 +29,12 @@ pub(crate) fn create_hdr_from_file(
     let (yy, uu, vv) = xyz_to_yuvprime_wide16(&x, &y, &z);
     
     let yy_oe = hlg_oetf_wide16(&yy);
-    
+
+    let max_yy_oe = yy_oe.iter().copied().reduce(f32::max).unwrap();
+    if gain_hdr>1.0/max_yy_oe {
+        println!("Warning, max y is {} so  gain_hdr*max y={}", max_yy_oe, gain_hdr*max_yy_oe);
+    }
+
     //Perform the multiplication in perceptually uniform space
     let ysdr_e = mul_vec_scalar_new_wide16(&yy_oe, gain_sdr);
     let yhdr_e = mul_vec_scalar_new_wide16(&yy_oe, gain_hdr);
@@ -47,10 +52,6 @@ pub(crate) fn create_hdr_from_file(
     encodemy_zen(
         to_file, width, height, &r_hdr, &g_hdr, &b_hdr, &r_sdr, &g_sdr, &b_sdr,
     );
-
-    //let _ = create_png("tmpsdr.png", width, height, &*r_sdr, &*g_sdr, &*b_sdr);
-
-    // let _ = create_png("tmphdr.png", width, height, &*r_hdr, &*g_hdr, &*b_hdr);
 
     let total = total_start.elapsed();
     println!("Total pipeline time: {:.3?}", total);
