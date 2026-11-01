@@ -9,6 +9,8 @@ use zenjpeg::ultrahdr::{
 use zenjpeg::ultrahdr::GainMapConfig;
 
 use zenjpeg::ultrahdr::UhdrColorGamut::Bt2020;
+use get_headroom::headroom_2bt2020raw;
+use crate::get_headroom;
 
 /// Compute a gain map from HDR and SDR images.
 ///
@@ -79,7 +81,7 @@ pub fn compute_mygainmap(
     // Headroom fields in GainMapMetadata are log2(display boost), while the
     // public GainMapConfig values are linear boost ratios.
     metadata.base_hdr_headroom = (config.base_hdr_headroom.max(1.0) as f64).log2();
-    metadata.alternate_hdr_headroom = (config.alternate_hdr_headroom.max(1.0) as f64).log2();
+    metadata.alternate_hdr_headroom = headroom_2bt2020raw(hdr, sdr);
     metadata.use_base_color_space = false;
     metadata.backward_direction = false;
 

@@ -127,7 +127,8 @@ pub(crate) fn create_from_2_raw(
     println!(" max log {:?}", metadata.gain_map_max);
     println!(" gamma {:?}", metadata.gamma);
     println!(" sdr offset {:?}", metadata.base_offset);
-    println!(" base hdr headroom {:?}", metadata.base_hdr_headroom);
+    println!(" base hdr headroom {:.2}", metadata.base_hdr_headroom);
+    println!(" alternate offset {:.2}", metadata.alternate_hdr_headroom);
     println!(" min boost: {:?}", gainmap_config.min_boost);
     println!(" max boost: {:?}", gainmap_config.max_boost);
 
