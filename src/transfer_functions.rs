@@ -1,6 +1,7 @@
 
+
 use ultrahdr_core::{ColorTransfer, RawImage};
-use zenjpeg::ultrahdr::{UhdrPixelFormat};
+use zenjpeg::ultrahdr::{ UhdrPixelFormat};
 
 pub fn apply_transfer_vec<F>(input: &[f32], f: F) -> Vec<f32>
 where

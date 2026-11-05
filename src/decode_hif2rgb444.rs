@@ -44,9 +44,7 @@ pub(crate) fn decode_heif2yuv_e_domain(
             upsample_422(&cr_norm, width / 2, width, height),
         ),
         3 => (cb_norm.clone(), cr_norm.clone()),
-        other => {
-            panic!("Unsupported chroma format: {}", other);
-        }
+        other => return Err(format!("Unsupported HEIF chroma format: {other}").into()),
     };
 
     Ok((width, height, y_norm, cb_full, cr_full))

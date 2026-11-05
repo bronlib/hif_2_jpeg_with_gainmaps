@@ -2,6 +2,7 @@
 name = "hif2jpeg"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
 heic-decoder = "0.1.0"
@@ -19,6 +20,10 @@ half = "2.7.1"
 
 oxideav-pixfmt = "0.1.11"
 bytemuck = "1.25.2"
+slint = "1.16.0"
+rfd = "0.17.2"
 
+[build-dependencies]
+slint-build = "1.16.0"
 
 

@@ -1,13 +1,13 @@
 //! Gain map computation from HDR and SDR images.
 
+
 use enough::{Stop};
 
 use zenjpeg::ultrahdr::{
-    GainMap, GainMapMetadata,  UhdrPixelFormat, UhdrRawImage,
+    GainMap, GainMapMetadata, UhdrPixelFormat, UhdrRawImage,
 };
 
 use zenjpeg::ultrahdr::GainMapConfig;
-
 use zenjpeg::ultrahdr::UhdrColorGamut::Bt2020;
 use get_headroom::headroom_2bt2020raw;
 use crate::get_headroom;
@@ -28,12 +28,12 @@ use crate::get_headroom;
 /// sRGB EOTF (inverse OETF): sRGB encoded `[0,1]` → Linear `[0,1]`
 ///
 /// Delegates to `linear-srgb` (rational polynomial, ~5e-7 max error, no `powf`).
-
 pub fn compute_mygainmap(
     hdr: &UhdrRawImage,
     sdr: &UhdrRawImage,
     config: &GainMapConfig,
     stop: impl Stop,
+    progress: &dyn Fn(&str),
 ) -> Result<(GainMap, GainMapMetadata), Box<dyn std::error::Error>> {
     // Validate pixel data is large enough for declared dimensions
     hdr.validate_data_bounds()?;
@@ -64,6 +64,7 @@ pub fn compute_mygainmap(
         &mut actual_min_boost,
         &mut actual_max_boost,
         &stop,
+        progress,
     )?;
 
     // Clamp actual values to configured range
@@ -100,8 +101,10 @@ fn mycompute_multichannel_gainmap(
     actual_min_boost: &mut f32,
     actual_max_boost: &mut f32,
     stop: &impl Stop,
+    progress: &dyn Fn(&str),
 ) -> Result<(GainMap, [f64; 3], [f64; 3]), Box<dyn std::error::Error>> {
     let mut gainmap = GainMap::new_multichannel(gm_width, gm_height)?;
+
 
     *actual_min_boost = 0.0;
     *actual_max_boost = 2.0;
@@ -157,9 +160,15 @@ fn mycompute_multichannel_gainmap(
             min_log[2] = min_log[2].min(log_b);
             max_log[2] = max_log[2].max(log_b);
         }
+        let interval = (gm_height / 100).max(1);
+        if gy % interval == 0 || gy + 1 == gm_height {
+            let percent = (gy + 1) * 100 / gm_height.max(1);
+            progress(&format!("Analyzing gain map: {percent}%"));
+        }
     }
 
     // Pass 2: Normalize log-gains using the dynamically calculated min/max bounds
+    progress("Packing gain-map pixels…");
     for gy in 0..gm_height {
         for gx in 0..gm_width {
             let log_val = log_gains[gy as usize][gx as usize];
@@ -179,9 +188,12 @@ fn mycompute_multichannel_gainmap(
                 gainmap.data[idx] = encoded;
             }
         }
+        let interval = (gm_height / 100).max(1);
+        if gy % interval == 0 || gy + 1 == gm_height {
+            let percent = (gy + 1) * 100 / gm_height.max(1);
+            progress(&format!("Packing gain map: {percent}%"));
+        }
     }
-
-
     println!("max_log: {:?}", max_log);
     println!("min_log: {:?}", min_log);
     let maxlog: [f64; 3] = max_log.map(|x| x as f64);
@@ -190,11 +202,19 @@ fn mycompute_multichannel_gainmap(
     Ok((gainmap, maxlog, minlog))
 }
 
+/// Extract linear RGB `[0,1]` from a raw image at the given pixel position.
+///
+/// When the `transfer` feature is enabled, this function applies appropriate
+/// EOTF conversions (sRGB, PQ, HLG) based on the image's transfer function.
+///
+/// When the `transfer` feature is disabled, only inherently linear formats
+/// (Rgba16F, Rgba32F) are supported. For encoded formats, the caller must
+/// pre-convert to linear using an external CMS.
 /// Extract linear RGB from a raw image (no transfer feature).
 ///
 /// Only supports inherently linear formats (Rgba16F, Rgba32F).
 /// For encoded formats (sRGB, PQ, etc.), use an external CMS to pre-convert.
-//#[cfg(not(feature = "transfer"))]
+
 fn get_linear_rgb(img: &UhdrRawImage, x: u32, y: u32) -> [f32; 3] {
     match img.format {
         UhdrPixelFormat::Rgba16F => {

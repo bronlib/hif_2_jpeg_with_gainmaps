@@ -1,0 +1,77 @@
+import { Button, HorizontalBox, LineEdit, VerticalBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "HEIF to Ultra HDR JPEG";
+    preferred-width: 720px;
+    preferred-height: 390px;
+    min-width: 600px;
+    min-height: 350px;
+
+    in-out property <string> input-path: "";
+    in-out property <string> output-path: "";
+    in-out property <string> sdr-gain: "1.0";
+    in-out property <string> hdr-gain: "1.0";
+    in-out property <string> status: "Choose a HIF/HEIF input and an output JPEG.";
+    in-out property <bool> busy: false;
+
+    callback browse-input();
+    callback browse-output();
+    callback encode();
+
+    VerticalBox {
+        padding: 24px;
+        spacing: 14px;
+
+        Text {
+            text: "Create an Ultra HDR JPEG";
+            font-size: 24px;
+            font-weight: 700;
+        }
+        Text {
+            text: "Select a HIF/HEIF image and set the SDR and HDR luminance gains.";
+            color: #667085;
+        }
+
+        HorizontalBox {
+            spacing: 10px;
+            Text { text: "Input file"; width: 105px; vertical-alignment: center; }
+            LineEdit { text <=> root.input-path; placeholder-text: "Choose a .hif, .heif, or .heic file"; }
+            Button { text: "Browse…"; clicked => { root.browse-input(); } }
+        }
+
+        HorizontalBox {
+            spacing: 10px;
+            Text { text: "Output file"; width: 105px; vertical-alignment: center; }
+            LineEdit { text <=> root.output-path; placeholder-text: "Choose an output .jpg file"; }
+            Button { text: "Browse…"; clicked => { root.browse-output(); } }
+        }
+
+        HorizontalBox {
+            spacing: 10px;
+            Text { text: "SDR Gain"; width: 105px; vertical-alignment: center; }
+            LineEdit { text <=> root.sdr-gain; width: 110px; }
+            Text { text: "HDR Gain"; width: 95px; vertical-alignment: center; }
+            LineEdit { text <=> root.hdr-gain; width: 110px; }
+            Text { text: "Positive multipliers"; color: #667085; vertical-alignment: center; }
+        }
+
+        Rectangle { height: 1px; background: #e4e7ec; }
+
+        HorizontalBox {
+            spacing: 12px;
+            alignment: end;
+            Text {
+                text: root.status;
+                color: #475467;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Button {
+                text: root.busy ? "Encoding…" : "Create JPEG";
+                enabled: !root.busy;
+                clicked => { root.encode(); }
+            }
+        }
+    }
+}

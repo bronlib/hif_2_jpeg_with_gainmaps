@@ -1,21 +1,18 @@
-use std::fs;
 
-use crate::create_png::create_pngu8;
-use enough::{Stop, StopReason, Unstoppable};
+
+use enough::{Stop, StopReason};
 use std::time::Instant;
 use ultrahdr_core::{GainMapEncodingFormat, RawImage};
 use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig};
 use zenjpeg::ultrahdr::{
     GainMapConfig, UhdrColorGamut, UhdrColorTransfer, UhdrPixelFormat, UhdrRawImage,
-    encode_with_gainmap_format
-};
+    encode_with_gainmap_format};
 
-use crate::color_transform::{bt2020_to_bt709, bt709_to_bt2020 };
+use crate::color_transform::bt2020_to_bt709;
 use crate::gain_mapping::compute_mygainmap;
 use crate::gainmap_jpeg_fix::{add_iso21496_to_xmp_ultrahdr, linear_bt2020_icc_profile};
 use crate::transfer_functions::apply_transfer;
 use oxideav_pixfmt::transfer::{ bt1886_inverse_eotf};
-use zenjpeg::decoder::{ Decoder};
 
 struct MyStop {
     stop: bool,
@@ -31,6 +28,7 @@ impl Stop for MyStop {
     }
 }
 
+/*
 fn get_pixels_rgb32f(file: &str) -> UhdrRawImage {
     let jpeg_data = fs::read(file).unwrap();
 
@@ -65,13 +63,33 @@ fn get_pixels_rgb32f(file: &str) -> UhdrRawImage {
     )
     .unwrap()
 }
+fn get_pixels_rgb8(file: &str) -> UhdrRawImage {
+    let jpeg_data = fs::read(file).unwrap();
 
+    let decoded = Decoder::new().decode(&jpeg_data, Unstoppable).unwrap();
+
+    let width = decoded.width;
+    let height = decoded.height;
+
+    let rgb: Vec<u8> = decoded.pixels_u8().expect("Expected 8-bit image").to_vec();
+
+    UhdrRawImage::from_data(
+        width,
+        height,
+        UhdrPixelFormat::Rgb8,
+        UhdrColorGamut::Bt2020,
+        UhdrColorTransfer::Linear,
+        rgb,
+    )
+    .unwrap()
+}
 
 pub(crate) fn create_from_2_files(
     hdr_file: &str,
     sdr_file: &str,
     to_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+
     println!(
         "create_from_2_file {}, {} to file {}",
         hdr_file, sdr_file, to_file
@@ -80,25 +98,18 @@ pub(crate) fn create_from_2_files(
     let hdr = get_pixels_rgb32f(hdr_file);
     let sdr = get_pixels_rgb32f(sdr_file);
 
-    create_from_2_raw(hdr, sdr, to_file)?;
+    create_from_2_raw(hdr, sdr, to_file, &|_| {})?;
     Ok(())
 }
-
+*/
 pub(crate) fn create_from_2_raw(
     hdr: RawImage,
     sdr: RawImage,
     to_file: &str,
+    progress: &dyn Fn(&str),
 ) -> Result<(), Box<dyn std::error::Error>> {
     let total_start = Instant::now();
     println!("create_from_2_raw : to file {}", to_file);
-    assert_eq!(sdr.gamut, UhdrColorGamut::Bt2020);
-    /*
-    Reduce the gammut so that the gainmap will include the
-    information needed to restore the full 2020 gamut of the
-    original picture
-     */
-    let sdr709=bt2020_to_bt709(&sdr);
-    let sdr2020 = bt709_to_bt2020(&sdr709);
 
     let stop = MyStop { stop: false };
 
@@ -113,10 +124,11 @@ pub(crate) fn create_from_2_raw(
     gainmap_config.base_hdr_headroom = 0.0;
     gainmap_config.alternate_hdr_headroom = 3.0;
 
-    let (gainmap, metadata) = compute_mygainmap(&hdr, &sdr2020, &gainmap_config, &stop).unwrap();
+    progress("Computing gain map…");
+    let (gainmap, metadata) = compute_mygainmap(&hdr, &sdr, &gainmap_config, &stop, progress)?;
     //stop.check();
 
-    let sdr_709 = bt2020_to_bt709(&sdr2020);
+    let sdr_709 = bt2020_to_bt709(&sdr);
     let sdr_e = apply_transfer(&sdr_709, &bt1886_inverse_eotf);
     let sdr_8 = rgba32f_to_rgb8(&sdr_e);
 
@@ -127,12 +139,12 @@ pub(crate) fn create_from_2_raw(
     println!(" max log {:?}", metadata.gain_map_max);
     println!(" gamma {:?}", metadata.gamma);
     println!(" sdr offset {:?}", metadata.base_offset);
-    println!(" base hdr headroom {:.2}", metadata.base_hdr_headroom);
-    println!(" alternate offset {:.2}", metadata.alternate_hdr_headroom);
+    println!(" base hdr headroom {:?}", metadata.base_hdr_headroom);
     println!(" min boost: {:?}", gainmap_config.min_boost);
     println!(" max boost: {:?}", gainmap_config.max_boost);
 
     // Step 3-6: Encode and assemble
+    progress("Encoding Ultra HDR JPEG…");
     let sdr_jpeg = encode_with_gainmap_format(
         &sdr_8,
         &gainmap,
@@ -149,30 +161,8 @@ pub(crate) fn create_from_2_raw(
     let alternate_space_icc = linear_bt2020_icc_profile();
     let sdr_jpeg = add_iso21496_to_xmp_ultrahdr(&sdr_jpeg, &metadata, &alternate_space_icc)?;
 
-    std::fs::write(&to_file, &sdr_jpeg).unwrap();
-
-    let rgb = gainmap.data;
-    let width = gainmap.width;
-    let height = gainmap.height;
-    let pixels = rgb.len() / 3;
-    let mut r = Vec::with_capacity(pixels);
-    let mut g = Vec::with_capacity(pixels);
-    let mut b = Vec::with_capacity(pixels);
-
-    for chunk in rgb.chunks_exact(3) {
-        r.push(chunk[0]);
-        g.push(chunk[1]);
-        b.push(chunk[2]);
-    }
-    create_pngu8(
-        "gainmapmy_h2.png",
-        width as usize,
-        height as usize,
-        &r,
-        &g,
-        &b,
-    )
-    .unwrap();
+    progress("Writing output JPEG…");
+    std::fs::write(&to_file, &sdr_jpeg)?;
 
     let total = total_start.elapsed();
     println!("Total pipeline time: {:.3?}", total);
@@ -204,7 +194,8 @@ pub(crate) fn encodemy_zen(
     r_sdr: &[f32],
     g_sdr: &[f32],
     b_sdr: &[f32],
-) {
+    progress: &dyn Fn(&str),
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("Encoding Zen to file : {}", to_file);
     let hdr_vec = pack_rgba32f_bytes(r_hdr, g_hdr, b_hdr);
     let sdr_vec = pack_rgba32f_bytes(r_sdr, g_sdr, b_sdr);
@@ -219,8 +210,7 @@ pub(crate) fn encodemy_zen(
         UhdrColorGamut::Bt2020,
         UhdrColorTransfer::Linear,
         hdr_vec,
-    )
-    .unwrap();
+    )?;
 
     let sdr = UhdrRawImage::from_data(
         widthu,
@@ -229,11 +219,12 @@ pub(crate) fn encodemy_zen(
         UhdrColorGamut::Bt2020,
         UhdrColorTransfer::Linear,
         sdr_vec,
-    )
-    .unwrap();
+    )?;
 
-    create_from_2_raw(hdr, sdr, &to_file).unwrap();
+    create_from_2_raw(hdr, sdr, to_file, progress)?;
+    Ok(())
 }
+
 
 pub(crate) fn rgba32f_to_rgb8(image: &RawImage) -> RawImage {
     assert_eq!(image.format, UhdrPixelFormat::Rgba32F);
