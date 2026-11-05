@@ -5,12 +5,16 @@ use crate::color_spaces::bt2020_yuv_to_rgb_wide16;
 use crate::filters::upsample_420;
 use crate::filters::upsample_422;
 use crate::hlg::hlg_eotf_wide16;
+use std::path::PathBuf;
 
 pub(crate) fn decode_heif2yuv_e_domain(
-    name: &str,
+    name: &PathBuf,
 ) -> Result<(usize, usize, Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn std::error::Error>> {
     let data = fs::read(&name)?;
     let image = decode(&data)?;
+
+    let color_info= image.metadata.color_info;
+    println!("image color:{:?}", color_info );
 
     let width = image.width as usize;
     let height = image.height as usize;
@@ -44,14 +48,16 @@ pub(crate) fn decode_heif2yuv_e_domain(
             upsample_422(&cr_norm, width / 2, width, height),
         ),
         3 => (cb_norm.clone(), cr_norm.clone()),
-        other => return Err(format!("Unsupported HEIF chroma format: {other}").into()),
+        other => {
+            panic!("Unsupported chroma format: {}", other);
+        }
     };
 
     Ok((width, height, y_norm, cb_full, cr_full))
 }
 
 pub(crate) fn decode_heif2rgb_e_domain(
-    name: &str,
+    name: &PathBuf,
 ) -> Result<(usize, usize, Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn std::error::Error>> {
     let (width, height, y, cb, cr) = decode_heif2yuv_e_domain(name)?;
 
@@ -61,7 +67,7 @@ pub(crate) fn decode_heif2rgb_e_domain(
 }
 
 pub(crate) fn decode_heif2rgb_o_domain(
-    name: &str,
+    name: &PathBuf,
 ) -> Result<(usize, usize, Vec<f32>, Vec<f32>, Vec<f32>), Box<dyn std::error::Error>> {
     let (width, height, r, g, b) = decode_heif2rgb_e_domain(name)?;
 
