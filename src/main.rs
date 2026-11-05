@@ -14,7 +14,7 @@ mod gain_mapping;
 mod gainmap_jpeg_fix;
 //pub mod rgb2020_709;
 pub mod transfer_functions;
-
+pub mod get_headroom;
 use create_jpeg_from_2_files::create_from_2_files;
 use create_jpeg_from_hdr::create_hdr_from_file;
 
