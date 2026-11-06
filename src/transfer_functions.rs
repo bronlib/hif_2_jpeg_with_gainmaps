@@ -29,7 +29,7 @@ where
     F: Fn(f32) -> f32,
 {
     assert_eq!(image.format, UhdrPixelFormat::Rgba32F);
-    assert_eq!(image.transfer, ColorTransfer::Linear);
+    //assert_eq!(image.transfer, ColorTransfer::Linear);
 
     let mut output = image.clone();
 

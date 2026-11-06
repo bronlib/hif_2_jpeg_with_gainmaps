@@ -1,6 +1,6 @@
 
 use enough::{Stop, StopReason};
-use ultrahdr_core::{GainMapEncodingFormat, RawImage};
+use ultrahdr_core::{ColorTransfer, GainMapEncodingFormat, RawImage};
 use zenjpeg::encoder::{ChromaSubsampling, EncoderConfig};
 use zenjpeg::ultrahdr::{
     GainMapConfig, UhdrColorGamut, UhdrColorTransfer, UhdrPixelFormat, UhdrRawImage,
@@ -97,7 +97,8 @@ pub(crate) fn create_from_2_raw(
     gainmap_config.alternate_hdr_headroom = 3.0;
 
     let sdr_709 = bt2020_to_bt709(&sdr2020);
-    let sdr_e = apply_transfer(&sdr_709, &bt1886_inverse_eotf);
+    let mut sdr_e = apply_transfer(&sdr_709, &bt1886_inverse_eotf);
+    sdr_e.transfer = ColorTransfer::Srgb;
     let sdr_8 = rgba32f_to_rgb8(&sdr_e);
 
     // Layer 1: Reusable config
@@ -148,7 +149,7 @@ pub(crate) fn create_from_2_raw(
 }
 
 /// Pack f32 RGB → RGBA32F → Vec<u8> (for ultrahdr-rs 0.3.5)
-fn pack_rgba32f_bytes(r: &[f32], g: &[f32], b: &[f32]) -> Vec<u8> {
+pub fn pack_rgba32f_bytes(r: &[f32], g: &[f32], b: &[f32]) -> Vec<u8> {
     let n = r.len();
     let mut out = Vec::with_capacity(n * 16);
 

@@ -1,9 +1,10 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod color_spaces;
 mod decode_hif2rgb444;
 mod filters;
 mod hlg;
+mod pq;
 mod simd_multiply;
 mod yuv_prime;
 
@@ -16,6 +17,8 @@ mod gainmap_jpeg_fix;
 //pub mod rgb2020_709;
 pub mod transfer_functions;
 pub mod get_headroom;
+pub mod raw_image_transforms;
+
 use eframe::egui;
 use std::path::PathBuf;
 use create_jpeg_from_hdr::create_hdr_from_file;
@@ -89,7 +92,7 @@ impl eframe::App for ImageViewerApp {
                 ui.horizontal(|ui| {
                     if ui.button("Select file").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Pictures", &["HIF", "HEIF"])
+                            .add_filter("Pictures", &["HIF","heif", "heic"])
                             .pick_file()
                         {
                             self.show_selected_file(ctx, path);
