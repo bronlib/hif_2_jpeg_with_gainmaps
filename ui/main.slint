@@ -1,0 +1,72 @@
+import { Button, CheckBox, ProgressIndicator, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "HIF Image Viewer";
+    width: 620px;
+    height: 240px;
+
+    in-out property <bool> loading: false;
+    in-out property <bool> create-gainmapped-jpg: false;
+    in-out property <string> error-message: "";
+    callback select-file();
+
+    VerticalBox {
+        padding: 24px;
+        spacing: 16px;
+
+        HorizontalBox {
+            alignment: start;
+            spacing: 16px;
+
+            Button {
+                text: "Select file";
+                enabled: !root.loading;
+                clicked => { root.select-file(); }
+            }
+
+            CheckBox {
+                text: "Create gainmapped JPG from the HIF file";
+                enabled: !root.loading;
+                checked <=> root.create-gainmapped-jpg;
+            }
+        }
+
+        if root.loading: HorizontalBox {
+            spacing: 10px;
+            ProgressIndicator {
+                indeterminate: true;
+                width: 24px;
+                height: 24px;
+            }
+            Text { text: "Processing picture…"; vertical-alignment: center; }
+        }
+
+        if root.error-message != "": Text {
+            text: root.error-message;
+            color: #c62828;
+            wrap: word-wrap;
+        }
+
+        Rectangle { background: transparent; }
+    }
+}
+
+export component ImageWindow inherits Window {
+    title: "Selected picture";
+    preferred-width: 900px;
+    preferred-height: 700px;
+    min-width: 320px;
+    min-height: 240px;
+    background: #202020;
+    in property <image> picture;
+
+    Image {
+        source: root.picture;
+        image-fit: contain;
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        height: parent.height - 24px;
+    }
+}
+

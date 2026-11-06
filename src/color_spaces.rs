@@ -71,6 +71,52 @@ pub fn bt2020_yuv_to_rgb_wide16(
     (r_out, g_out, b_out)
 }
 
+pub fn bt709_yuv_to_rgb_wide16(
+    y: &[f32],
+    cb: &[f32],
+    cr: &[f32],
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    const LANES: usize = 16;
+    let n = y.len();
+    let simd_chunks = n / LANES;
+    let remainder = n % LANES;
+
+    let mut r_out = vec![0.0f32; n];
+    let mut g_out = vec![0.0f32; n];
+    let mut b_out = vec![0.0f32; n];
+
+    for chunk in 0..simd_chunks {
+        let i = chunk * LANES;
+
+        let vy = f32x16::new(load_n!(y, i, LANES));
+        let vcb = f32x16::new(load_n!(cb, i, LANES));
+        let vcr = f32x16::new(load_n!(cr, i, LANES));
+
+        let vr = vy + vcr * f32x16::splat(1.5748);
+        let vg = vy - vcb * f32x16::splat(0.187324) - vcr * f32x16::splat(0.468124);
+        let vb = vy + vcb * f32x16::splat(1.8556);
+
+        store_n!(vr, r_out, i, LANES);
+        store_n!(vg, g_out, i, LANES);
+        store_n!(vb, b_out, i, LANES);
+    }
+
+    if remainder > 0 {
+        let start = simd_chunks * LANES;
+        for i in start..n {
+            let yv = y[i];
+            let cbv = cb[i];
+            let crv = cr[i];
+
+            r_out[i] = yv + 1.5748 * crv;
+            g_out[i] = yv - 0.187324 * cbv - 0.468124 * crv;
+            b_out[i] = yv + 1.8556 * cbv;
+        }
+    }
+
+    (r_out, g_out, b_out)
+}
+
 pub(crate) fn rgb_to_xyz_wide16(
     r_in: &[f32],
     g_in: &[f32],
