@@ -5,25 +5,18 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
+slint = "1.16"
+rfd = "0.15"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp"] }
 heic-decoder = "0.1.0"
-image = "0.25.10"
 wide = "1.7.1"
 enough = "0.4"
-
-# Our ultrahdr crates
 ultrahdr-rs = "0.3.4"
 ultrahdr-core = { version = "0.4.0", default-features = false }
-
-
 zenjpeg = { version = "0.8.4", features = ["ultrahdr", "decoder"] }
 half = "2.7.1"
-
 oxideav-pixfmt = "0.1.11"
 bytemuck = "1.25.2"
-slint = "1.16.0"
-rfd = "0.17.2"
 
 [build-dependencies]
-slint-build = "1.16.0"
-
-
+slint-build = "1.16"

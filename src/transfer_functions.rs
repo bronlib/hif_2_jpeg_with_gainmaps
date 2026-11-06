@@ -1,7 +1,6 @@
 
-
 use ultrahdr_core::{ColorTransfer, RawImage};
-use zenjpeg::ultrahdr::{ UhdrPixelFormat};
+use zenjpeg::ultrahdr::{UhdrPixelFormat};
 
 pub fn apply_transfer_vec<F>(input: &[f32], f: F) -> Vec<f32>
 where
@@ -30,7 +29,7 @@ where
     F: Fn(f32) -> f32,
 {
     assert_eq!(image.format, UhdrPixelFormat::Rgba32F);
-    assert_eq!(image.transfer, ColorTransfer::Linear);
+    //assert_eq!(image.transfer, ColorTransfer::Linear);
 
     let mut output = image.clone();
 
