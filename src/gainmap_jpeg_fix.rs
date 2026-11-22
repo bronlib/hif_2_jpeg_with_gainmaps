@@ -1,0 +1,569 @@
+//! Adds the ISO 21496-1 gain-map metadata while retaining the XMP layout used
+//! by Chrome and other XMP-based Ultra HDR readers.
+
+use ultrahdr_core::{
+    GainMapMetadata, Iso21496Format,
+    metadata::iso21496::{create_iso_app2_marker, serialize_iso21496},
+};
+
+const ISO_URN: &[u8] = b"urn:iso:std:iso:ts:21496:-1\0";
+const ICC_SIGNATURE: &[u8] = b"ICC_PROFILE\0";
+
+type Matrix3 = [[f64; 3]; 3];
+
+fn matrix_vector(m: Matrix3, v: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|r| m[r][0] * v[0] + m[r][1] * v[1] + m[r][2] * v[2])
+}
+
+fn matrix_multiply(a: Matrix3, b: Matrix3) -> Matrix3 {
+    std::array::from_fn(|r| std::array::from_fn(|c| (0..3).map(|k| a[r][k] * b[k][c]).sum()))
+}
+
+fn matrix_inverse(m: Matrix3) -> Result<Matrix3, String> {
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if det.abs() < 1e-12 {
+        return Err("singular matrix while building BT.2020 ICC profile".into());
+    }
+    let inv_det = 1.0 / det;
+    Ok([
+        [
+            (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * inv_det,
+            (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * inv_det,
+            (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * inv_det,
+        ],
+        [
+            (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * inv_det,
+            (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * inv_det,
+            (m[0][2] * m[1][0] - m[0][0] * m[1][2]) * inv_det,
+        ],
+        [
+            (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * inv_det,
+            (m[0][1] * m[2][0] - m[0][0] * m[2][1]) * inv_det,
+            (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * inv_det,
+        ],
+    ])
+}
+
+fn s15fixed16(value: f64) -> [u8; 4] {
+    ((value * 65536.0).round() as i32).to_be_bytes()
+}
+
+fn icc_xyz_tag(xyz: [f64; 3]) -> Vec<u8> {
+    let mut tag = b"XYZ \0\0\0\0".to_vec();
+    for value in xyz {
+        tag.extend_from_slice(&s15fixed16(value));
+    }
+    tag
+}
+
+fn icc_mluc_tag(text: &str) -> Vec<u8> {
+    let encoded: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+    let mut tag = b"mluc\0\0\0\0".to_vec();
+    tag.extend_from_slice(&1u32.to_be_bytes()); // one localized record
+    tag.extend_from_slice(&12u32.to_be_bytes()); // record size
+    tag.extend_from_slice(b"enUS");
+    tag.extend_from_slice(&(encoded.len() as u32).to_be_bytes());
+    tag.extend_from_slice(&28u32.to_be_bytes());
+    tag.extend_from_slice(&encoded);
+    tag
+}
+
+/// Construct the linear BT.2020 RGB ICC profile used by the Python encoder.
+/// It carries BT.2020 primaries and CICP (primaries 9, linear transfer 8).
+pub fn linear_bt2020_icc_profile() -> Vec<u8> {
+    let xy_to_xyz = |x: f64, y: f64| [x / y, 1.0, (1.0 - x - y) / y];
+    let primaries = [
+        xy_to_xyz(0.708, 0.292),
+        xy_to_xyz(0.170, 0.797),
+        xy_to_xyz(0.131, 0.046),
+    ];
+    let primary_matrix = [
+        [primaries[0][0], primaries[1][0], primaries[2][0]],
+        [primaries[0][1], primaries[1][1], primaries[2][1]],
+        [primaries[0][2], primaries[1][2], primaries[2][2]],
+    ];
+    let source_white = xy_to_xyz(0.3127, 0.3290);
+    let scale = matrix_vector(
+        matrix_inverse(primary_matrix).expect("BT.2020 primaries are invertible"),
+        source_white,
+    );
+    let rgb_to_xyz_source: Matrix3 =
+        std::array::from_fn(|r| std::array::from_fn(|c| primary_matrix[r][c] * scale[c]));
+
+    let bradford = [
+        [0.8951, 0.2664, -0.1614],
+        [-0.7502, 1.7135, 0.0367],
+        [0.0389, -0.0685, 1.0296],
+    ];
+    let d50 = [0.9642, 1.0, 0.8249];
+    let bradford_white = matrix_vector(bradford, source_white);
+    let bradford_d50 = matrix_vector(bradford, d50);
+    let ratios: [f64; 3] = std::array::from_fn(|i| bradford_d50[i] / bradford_white[i]);
+    let diagonal: Matrix3 = [
+        [ratios[0], 0.0, 0.0],
+        [0.0, ratios[1], 0.0],
+        [0.0, 0.0, ratios[2]],
+    ];
+    let adaptation = matrix_multiply(
+        matrix_multiply(
+            matrix_inverse(bradford).expect("Bradford matrix is invertible"),
+            diagonal,
+        ),
+        bradford,
+    );
+    let rgb_to_xyz_d50 = matrix_multiply(adaptation, rgb_to_xyz_source);
+
+    let mut chad = b"sf32\0\0\0\0".to_vec();
+    for value in adaptation.into_iter().flatten() {
+        chad.extend_from_slice(&s15fixed16(value));
+    }
+    let mut linear_trc = b"curv\0\0\0\0".to_vec();
+    linear_trc.extend_from_slice(&1u32.to_be_bytes());
+    linear_trc.extend_from_slice(&256u16.to_be_bytes());
+    linear_trc.extend_from_slice(&[0, 0]);
+    let mut cicp = b"cicp\0\0\0\0".to_vec();
+    cicp.extend_from_slice(&[9, 8, 0, 1]); // BT.2020, linear, RGB, full range
+
+    let tags: Vec<([u8; 4], Vec<u8>)> = vec![
+        (*b"desc", icc_mluc_tag("BT2020 linear RGB")),
+        (*b"cprt", icc_mluc_tag("Generated by hif2jpeg")),
+        (*b"wtpt", icc_xyz_tag(d50)),
+        (*b"chad", chad),
+        (
+            *b"rXYZ",
+            icc_xyz_tag([
+                rgb_to_xyz_d50[0][0],
+                rgb_to_xyz_d50[1][0],
+                rgb_to_xyz_d50[2][0],
+            ]),
+        ),
+        (
+            *b"gXYZ",
+            icc_xyz_tag([
+                rgb_to_xyz_d50[0][1],
+                rgb_to_xyz_d50[1][1],
+                rgb_to_xyz_d50[2][1],
+            ]),
+        ),
+        (
+            *b"bXYZ",
+            icc_xyz_tag([
+                rgb_to_xyz_d50[0][2],
+                rgb_to_xyz_d50[1][2],
+                rgb_to_xyz_d50[2][2],
+            ]),
+        ),
+        (*b"rTRC", linear_trc.clone()),
+        (*b"gTRC", linear_trc.clone()),
+        (*b"bTRC", linear_trc),
+        (*b"cicp", cicp),
+    ];
+
+    let mut header = vec![0u8; 128];
+    header[4..8].copy_from_slice(b"rust");
+    header[8..12].copy_from_slice(&0x0440_0000u32.to_be_bytes()); // ICC v4.4
+    header[12..16].copy_from_slice(b"mntr");
+    header[16..20].copy_from_slice(b"RGB ");
+    header[20..24].copy_from_slice(b"XYZ ");
+    header[24..36].copy_from_slice(
+        &[2026u16, 10, 30, 0, 0, 0]
+            .into_iter()
+            .flat_map(u16::to_be_bytes)
+            .collect::<Vec<_>>(),
+    );
+    header[36..40].copy_from_slice(b"acsp");
+    header[40..44].copy_from_slice(b"APPL");
+    header[64..68].copy_from_slice(&0u32.to_be_bytes());
+    for (i, value) in d50.into_iter().enumerate() {
+        header[68 + i * 4..72 + i * 4].copy_from_slice(&s15fixed16(value));
+    }
+    header[80..84].copy_from_slice(b"rust");
+
+    let mut table = Vec::with_capacity(4 + 12 * tags.len());
+    table.extend_from_slice(&(tags.len() as u32).to_be_bytes());
+    let mut payload = Vec::new();
+    let mut offset = 128 + 4 + 12 * tags.len();
+    for (signature, data) in tags {
+        let padding = (4 - offset % 4) % 4;
+        payload.resize(payload.len() + padding, 0);
+        offset += padding;
+        table.extend_from_slice(&signature);
+        table.extend_from_slice(&(offset as u32).to_be_bytes());
+        table.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        payload.extend_from_slice(&data);
+        offset += data.len();
+    }
+    let mut profile = header;
+    profile.extend_from_slice(&table);
+    profile.extend_from_slice(&payload);
+    let profile_len = profile.len() as u32;
+    profile[0..4].copy_from_slice(&profile_len.to_be_bytes());
+    profile
+}
+
+fn icc_app2_markers(profile: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    if profile.is_empty() {
+        return Err("ICC profile is empty".into());
+    }
+    const ICC_CHUNK_MAX: usize = 65_519; // 65,533-byte APP2 payload minus 14-byte ICC header
+    let count = profile.len().div_ceil(ICC_CHUNK_MAX);
+    if count > u8::MAX as usize {
+        return Err("ICC profile needs more than 255 JPEG APP2 chunks".into());
+    }
+    profile
+        .chunks(ICC_CHUNK_MAX)
+        .enumerate()
+        .map(|(i, chunk)| {
+            let mut payload = Vec::with_capacity(14 + chunk.len());
+            payload.extend_from_slice(ICC_SIGNATURE);
+            payload.push((i + 1) as u8);
+            payload.push(count as u8);
+            payload.extend_from_slice(chunk);
+            app2(&payload)
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+struct Segment {
+    marker: u8,
+    start: usize,
+    end: usize,
+    payload_start: usize,
+    payload_end: usize,
+}
+
+fn jpeg_header_segments(jpeg: &[u8]) -> Result<Vec<Segment>, String> {
+    if jpeg.get(0..2) != Some(&[0xff, 0xd8]) {
+        return Err("not a JPEG (SOI missing)".into());
+    }
+    let mut segments = Vec::new();
+    let mut pos = 2;
+    while pos < jpeg.len() {
+        if jpeg[pos] != 0xff {
+            return Err(format!("invalid JPEG marker at byte {pos}"));
+        }
+        let start = pos;
+        while pos < jpeg.len() && jpeg[pos] == 0xff {
+            pos += 1;
+        }
+        let marker = *jpeg.get(pos).ok_or("truncated JPEG marker")?;
+        pos += 1;
+        if marker == 0xda || marker == 0xd9 {
+            break;
+        }
+        if marker == 0xd8 || (0xd0..=0xd7).contains(&marker) || marker == 0x01 {
+            segments.push(Segment {
+                marker,
+                start,
+                end: pos,
+                payload_start: pos,
+                payload_end: pos,
+            });
+            continue;
+        }
+        let len_bytes = jpeg
+            .get(pos..pos + 2)
+            .ok_or("truncated JPEG segment length")?;
+        let length = u16::from_be_bytes([len_bytes[0], len_bytes[1]]) as usize;
+        if length < 2 {
+            return Err("invalid JPEG segment length".into());
+        }
+        let end = pos
+            .checked_add(length)
+            .ok_or("JPEG segment length overflow")?;
+        if end > jpeg.len() {
+            return Err("JPEG segment extends beyond file".into());
+        }
+        segments.push(Segment {
+            marker,
+            start,
+            end,
+            payload_start: pos + 2,
+            payload_end: end,
+        });
+        pos = end;
+    }
+    Ok(segments)
+}
+
+fn read_u16(data: &[u8], pos: usize, le: bool) -> Result<u16, String> {
+    let b = data.get(pos..pos + 2).ok_or("truncated MPF u16")?;
+    Ok(if le {
+        u16::from_le_bytes([b[0], b[1]])
+    } else {
+        u16::from_be_bytes([b[0], b[1]])
+    })
+}
+fn read_u32(data: &[u8], pos: usize, le: bool) -> Result<u32, String> {
+    let b = data.get(pos..pos + 4).ok_or("truncated MPF u32")?;
+    Ok(if le {
+        u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+    } else {
+        u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+    })
+}
+fn write_u32(data: &mut [u8], pos: usize, value: u32, le: bool) -> Result<(), String> {
+    let dst = data.get_mut(pos..pos + 4).ok_or("truncated MPF field")?;
+    let bytes = if le {
+        value.to_le_bytes()
+    } else {
+        value.to_be_bytes()
+    };
+    dst.copy_from_slice(&bytes);
+    Ok(())
+}
+
+struct MpfFields {
+    tiff_start: usize,
+    primary_size_pos: usize,
+    secondary_size_pos: usize,
+    secondary_offset_pos: usize,
+    le: bool,
+    primary_size: usize,
+    secondary_size: usize,
+    secondary_offset: usize,
+}
+
+fn mpf_fields(primary: &[u8], segments: &[Segment]) -> Result<MpfFields, String> {
+    let seg = segments
+        .iter()
+        .find(|s| {
+            s.marker == 0xe2 && primary.get(s.payload_start..s.payload_start + 4) == Some(b"MPF\0")
+        })
+        .ok_or("JPEG has no MPF directory")?;
+    let tiff = seg.payload_start + 4;
+    let order = primary
+        .get(tiff..tiff + 2)
+        .ok_or("truncated MPF TIFF header")?;
+    let le = match order {
+        b"II" => true,
+        b"MM" => false,
+        _ => return Err("invalid MPF byte order".into()),
+    };
+    let ifd = tiff + read_u32(primary, tiff + 4, le)? as usize;
+    let count = read_u16(primary, ifd, le)? as usize;
+    let mut mp_entry_offset = None;
+    for i in 0..count {
+        let entry = ifd + 2 + i * 12;
+        if read_u16(primary, entry, le)? == 0xb002 {
+            mp_entry_offset = Some(read_u32(primary, entry + 8, le)? as usize);
+            break;
+        }
+    }
+    let entries = tiff + mp_entry_offset.ok_or("MPF MPEntry tag missing")?;
+    let primary_size_pos = entries + 4;
+    let secondary_offset_pos = entries + 16 + 8;
+    let secondary_size_pos = entries + 16 + 4;
+    let primary_size = read_u32(primary, primary_size_pos, le)? as usize;
+    let secondary_size = read_u32(primary, secondary_size_pos, le)? as usize;
+    let secondary_offset = read_u32(primary, secondary_offset_pos, le)? as usize;
+    Ok(MpfFields {
+        tiff_start: tiff,
+        primary_size_pos,
+        secondary_size_pos,
+        secondary_offset_pos,
+        le,
+        primary_size,
+        secondary_size,
+        secondary_offset,
+    })
+}
+
+fn app2(payload: &[u8]) -> Result<Vec<u8>, String> {
+    let length = payload.len() + 2;
+    if length > u16::MAX as usize {
+        return Err("APP2 payload exceeds JPEG segment limit".into());
+    }
+    let mut marker = Vec::with_capacity(payload.len() + 4);
+    marker.extend_from_slice(&[0xff, 0xe2]);
+    marker.extend_from_slice(&(length as u16).to_be_bytes());
+    marker.extend_from_slice(payload);
+    Ok(marker)
+}
+
+fn update_xmp_gainmap_length(
+    primary: &[u8],
+    segments: &[Segment],
+    length: usize,
+) -> Result<Vec<u8>, String> {
+    let seg = segments
+        .iter()
+        .find(|s| {
+            s.marker == 0xe1
+                && primary
+                    .get(s.payload_start..s.payload_end)
+                    .is_some_and(|p| p.windows(19).any(|w| w == b"Container:Directory"))
+        })
+        .ok_or("primary XMP Container:Directory not found")?;
+    let mut payload = primary[seg.payload_start..seg.payload_end].to_vec();
+    let semantic = b"Item:Semantic=\"GainMap\"";
+    let sem = payload
+        .windows(semantic.len())
+        .position(|w| w == semantic)
+        .ok_or("GainMap XMP item not found")?;
+    let tail = &payload[sem..];
+    let key = b"Item:Length=\"";
+    let rel = tail
+        .windows(key.len())
+        .position(|w| w == key)
+        .ok_or("GainMap XMP Item:Length not found")?
+        + key.len();
+    let start = sem + rel;
+    let end = start
+        + payload[start..]
+            .iter()
+            .position(|&b| b == b'"')
+            .ok_or("unterminated XMP Item:Length")?;
+    let digits = length.to_string();
+    payload.splice(start..end, digits.bytes());
+    let jpeg_segment_length = payload.len() + 2;
+    if jpeg_segment_length > u16::MAX as usize {
+        return Err("updated primary XMP exceeds JPEG APP1 segment limit".into());
+    }
+    let mut xmp_segment = Vec::with_capacity(payload.len() + 4);
+    xmp_segment.extend_from_slice(&[0xff, 0xe1]);
+    xmp_segment.extend_from_slice(&(jpeg_segment_length as u16).to_be_bytes());
+    xmp_segment.extend_from_slice(&payload);
+
+    let mut updated = Vec::with_capacity(primary.len() + xmp_segment.len() - (seg.end - seg.start));
+    updated.extend_from_slice(&primary[..seg.start]);
+    updated.extend_from_slice(&xmp_segment);
+    updated.extend_from_slice(&primary[seg.end..]);
+    Ok(updated)
+}
+
+/// Add canonical ISO APP2 metadata to both the primary JPEG (version-only)
+/// and gain-map JPEG (full metadata), preserving the existing XMP metadata.
+pub fn add_iso21496_to_xmp_ultrahdr(
+    jpeg: &[u8],
+    metadata: &GainMapMetadata,
+    alternate_space_icc: &[u8],
+) -> Result<Vec<u8>, String> {
+    let segs = jpeg_header_segments(jpeg)?;
+    let primary_size = mpf_fields(jpeg, &segs)?.primary_size;
+    if primary_size > jpeg.len() {
+        return Err("MPF primary image size exceeds file size".into());
+    }
+    let primary = jpeg[..primary_size].to_vec();
+    let mpf = mpf_fields(&primary, &jpeg_header_segments(&primary)?)?;
+    let secondary_start = mpf
+        .tiff_start
+        .checked_add(mpf.secondary_offset)
+        .ok_or("MPF offset overflow")?;
+    let secondary_end = secondary_start
+        .checked_add(mpf.secondary_size)
+        .ok_or("MPF size overflow")?;
+    if secondary_end > jpeg.len() {
+        return Err("MPF gain-map range extends beyond file".into());
+    }
+    let secondary = jpeg[secondary_start..secondary_end].to_vec();
+    let secondary_segments = jpeg_header_segments(&secondary)?;
+    let have_full_iso = secondary_segments.iter().any(|s| {
+        s.marker == 0xe2
+            && secondary
+                .get(s.payload_start..s.payload_end)
+                .is_some_and(|p| p.starts_with(ISO_URN))
+    });
+    let have_icc = secondary_segments.iter().any(|s| {
+        s.marker == 0xe2
+            && secondary
+                .get(s.payload_start..s.payload_end)
+                .is_some_and(|p| p.starts_with(ICC_SIGNATURE))
+    });
+    let have_primary_iso = segs.iter().any(|s| {
+        s.marker == 0xe2
+            && jpeg
+                .get(s.payload_start..s.payload_end)
+                .is_some_and(|p| p.starts_with(ISO_URN))
+    });
+
+    let iso = serialize_iso21496(metadata, Iso21496Format::JpegApp2);
+    let full_marker = if have_full_iso {
+        Vec::new()
+    } else {
+        create_iso_app2_marker(&iso)
+    };
+    let mut primary_payload = ISO_URN.to_vec();
+    primary_payload.extend_from_slice(&[0, 0, 0, 0]); // version-only ISO block
+    let primary_marker = if have_primary_iso {
+        Vec::new()
+    } else {
+        app2(&primary_payload)?
+    };
+    let icc_markers = if have_icc {
+        Vec::new()
+    } else {
+        icc_app2_markers(alternate_space_icc)?
+    };
+    let icc_marker_bytes: usize = icc_markers.iter().map(Vec::len).sum();
+
+    let new_secondary_len = secondary.len() + full_marker.len() + icc_marker_bytes;
+    let primary_segments = jpeg_header_segments(&primary)?;
+    let mut primary = update_xmp_gainmap_length(&primary, &primary_segments, new_secondary_len)?;
+
+    // Place the primary ISO block immediately after MPF, leaving the TIFF
+    // offset origin unchanged. This keeps all existing MPF pointers valid.
+    if !primary_marker.is_empty() {
+        let current_segs = jpeg_header_segments(&primary)?;
+        let mpf_seg = current_segs
+            .iter()
+            .find(|s| {
+                s.marker == 0xe2
+                    && primary.get(s.payload_start..s.payload_start + 4) == Some(b"MPF\0")
+            })
+            .ok_or("MPF segment missing")?;
+        primary.splice(mpf_seg.end..mpf_seg.end, primary_marker.iter().copied());
+    }
+    let mut secondary_insertions = Vec::with_capacity(icc_marker_bytes + full_marker.len());
+    for marker in &icc_markers {
+        secondary_insertions.extend_from_slice(marker);
+    }
+    secondary_insertions.extend_from_slice(&full_marker);
+    let updated_secondary = if !secondary_insertions.is_empty() {
+        let insert_at = secondary_segments
+            .iter()
+            .find(|s| {
+                s.marker == 0xe1
+                    && secondary
+                        .get(s.payload_start..s.payload_end)
+                        .is_some_and(|p| p.starts_with(b"http://ns.adobe.com/xap/1.0/\0"))
+            })
+            .map(|s| s.end)
+            .unwrap_or(2);
+        let mut updated = Vec::with_capacity(new_secondary_len);
+        updated.extend_from_slice(&secondary[..insert_at]);
+        updated.extend_from_slice(&secondary_insertions);
+        updated.extend_from_slice(&secondary[insert_at..]);
+        updated
+    } else {
+        secondary
+    };
+
+    let mpf_now = mpf_fields(&primary, &jpeg_header_segments(&primary)?)?;
+    let new_primary_len = primary.len() as u32;
+    write_u32(
+        &mut primary,
+        mpf_now.primary_size_pos,
+        new_primary_len,
+        mpf_now.le,
+    )?;
+    write_u32(
+        &mut primary,
+        mpf_now.secondary_size_pos,
+        updated_secondary.len() as u32,
+        mpf_now.le,
+    )?;
+    write_u32(
+        &mut primary,
+        mpf_now.secondary_offset_pos,
+        (mpf.secondary_offset + primary_marker.len()) as u32,
+        mpf_now.le,
+    )?;
+    let mut output = primary;
+    output.extend_from_slice(&updated_secondary);
+    output.extend_from_slice(&jpeg[secondary_end..]);
+    Ok(output)
+}
