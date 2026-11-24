@@ -19,6 +19,13 @@ pub mod transfer_functions;
 pub mod get_headroom;
 pub mod raw_image_transforms;
 
+pub mod create_png;
+pub mod decode_gainmapped_jpg;
+
+use decode_hif2rgb444::decode_heif2img;
+
+use decode_gainmapped_jpg::decode_file;
+
 use eframe::egui;
 use std::path::PathBuf;
 use create_jpeg_from_hdr::create_hdr_from_file;
@@ -157,11 +164,23 @@ impl ImageViewerApp {
     /// Run the potentially slow image conversion away from the UI thread.
     fn show_selected_file(&mut self, ctx: &egui::Context, path: PathBuf) {
         let (tx, rx) = mpsc::channel();
+        let file_extension = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+
+        let is_jpeg = ["jpeg", "jpg"].contains(&file_extension);
         let repaint_ctx = ctx.clone();
         let create_gainmapped_jpg = self.create_gainmapped_jpg;
         std::thread::spawn(move || {
-            let result = create_hdr_from_file(&path, create_gainmapped_jpg)
-                .map_err(|error| error.to_string());
+
+            let result = if is_jpeg{
+                decode_file(&path)
+
+            }else{
+                decode_heif2img(&path)
+               // create_hdr_from_file(&path, create_gainmapped_jpg).map_err(|error| error.to_string())
+            };
             let _ = tx.send(result);
             repaint_ctx.request_repaint();
         });

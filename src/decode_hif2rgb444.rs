@@ -1,6 +1,8 @@
 use heic_decoder::{decode, ColorInfo};
 use std::fs;
 use crate::color_spaces::{bt2020_yuv_to_rgb_wide16, bt709_yuv_to_rgb_wide16};
+use crate::color_transform::{bt2020_to_bt709, bt709_to_bt2020 };
+use crate::decode_gainmapped_jpg::DecodedJpeg;
 use crate::filters::upsample_420;
 use crate::filters::upsample_422;
 use crate::hlg::hlg_eotf_wide16;
@@ -8,10 +10,49 @@ use std::path::PathBuf;
 use oxideav_pixfmt::transfer::bt1886_eotf;
 use ultrahdr_core::ColorTransfer;
 use zenjpeg::ultrahdr::{UhdrColorGamut, UhdrColorTransfer, UhdrPixelFormat};
-use crate::color_transform::bt709_to_bt2020;
-use crate::pq::pq_eotf_wide16;
+use oxideav_pixfmt::transfer::{ bt1886_inverse_eotf};
+
 use crate::transfer_functions::apply_transfer;
+use crate::pq::pq_eotf_wide16;
+
 use crate::raw_image_transforms::{raw_image_to_rgb, rgb_to_raw_image};
+use image::{DynamicImage};
+
+use crate::create_jpeg_from_2_files::rgba32f_to_rgb8;
+
+//use crate::decode_gainmapped_jpg::DecodedJpeg;
+
+pub (crate) fn decode_heif2img( name: &PathBuf)->Result<DynamicImage, String>{
+
+    //this creates a raw image in bt.2020 linear domain
+    let (width, height, r, g, b) = decode_heif2rgb_o_domain(name).unwrap();
+    println!("width={width}, height={height}");
+    let hdr = rgb_to_raw_image(width, height, &r, &g, &b,
+                               UhdrPixelFormat::Rgba32F,
+                              UhdrColorGamut::Bt2020,
+                              UhdrColorTransfer::Linear).unwrap();
+
+    //transfer to bt709
+    let hdr709=bt2020_to_bt709(&hdr);
+    //apply itu  ->e
+    let mut sdr_e = apply_transfer(&hdr709, &bt1886_inverse_eotf);
+    sdr_e.transfer = UhdrColorTransfer::Srgb;
+    let sdr_8 = rgba32f_to_rgb8(&sdr_e);
+    let mut final_jpeg = DecodedJpeg::default();
+    final_jpeg.width = width as u32;
+    final_jpeg.height = height  as u32;
+    final_jpeg.has_gain_map = false;
+    final_jpeg.gain_map = None;
+    final_jpeg.metadata = None;
+    final_jpeg.hdr_linear_bt2020 =  None;
+
+
+
+    final_jpeg.rgb = sdr_8.data;
+
+    final_jpeg.create_dyn()
+
+}
 
 pub(crate) fn decode_heif2yuv_e_domain(
     name: &PathBuf,
@@ -100,8 +141,8 @@ pub(crate) fn decode_heif2rgb_o_domain(
 
     if color_info.is_none() {
         let sdr_709 = rgb_to_raw_image(
-            width as u32,
-            height as u32,
+            width,
+            height,
             &r,
             &g,
             &b,
@@ -132,8 +173,8 @@ pub(crate) fn decode_heif2rgb_o_domain(
             ),
             1 | 6 | 14 | 15 =>{
             let sdr_709 = rgb_to_raw_image(
-                width as u32,
-                height as u32,
+                width,
+                height,
                 &r,
                 &g,
                 &b,
@@ -141,7 +182,7 @@ pub(crate) fn decode_heif2rgb_o_domain(
                 UhdrColorGamut::Bt709,
                 UhdrColorTransfer::Srgb,
             )?;
-
+            println!("Going through default hief from 709 to linear");
             let mut sdr_e = apply_transfer(&sdr_709, &bt1886_eotf);
             sdr_e.transfer = ColorTransfer::Linear;
             let sdr2020 = bt709_to_bt2020(&sdr_e);

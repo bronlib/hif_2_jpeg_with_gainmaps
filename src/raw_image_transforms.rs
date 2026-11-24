@@ -55,8 +55,8 @@ pub (crate) fn raw_image_to_rgb(
 /// pixel format, gamut, and transfer are stored as image metadata; samples are
 /// copied without color conversion, and alpha is set to 1.0.
 pub (crate) fn rgb_to_raw_image(
-    width: u32,
-    height: u32,
+    width: usize,
+    height: usize,
     r: &[f32],
     g: &[f32],
     b: &[f32],
@@ -70,8 +70,8 @@ pub (crate) fn rgb_to_raw_image(
         ));
     }
 
-    let pixel_count = (width as usize)
-        .checked_mul(height as usize)
+    let pixel_count = width
+        .checked_mul(height)
         .ok_or_else(|| "RawImage dimensions overflow".to_string())?;
     if r.len() != pixel_count || g.len() != pixel_count || b.len() != pixel_count {
         return Err(format!(
@@ -93,6 +93,6 @@ pub (crate) fn rgb_to_raw_image(
         data.extend_from_slice(&1.0f32.to_le_bytes());
     }
 
-    RawImage::from_data(width, height, format, gamut, transfer, data)
+    RawImage::from_data(width as u32, height as u32, format, gamut, transfer, data)
         .map_err(|error| error.to_string())
 }

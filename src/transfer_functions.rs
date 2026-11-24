@@ -47,7 +47,7 @@ where
         pixel[8..12].copy_from_slice(&b709.to_ne_bytes());
     }
 
-    output.transfer = ColorTransfer::Srgb;
+    
 
     println!(
         "Let op gamut is : {:?} transfer = {:?}",

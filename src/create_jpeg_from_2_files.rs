@@ -220,6 +220,9 @@ pub(crate) fn rgba32f_to_rgb8(image: &RawImage) -> RawImage {
         data.push((b.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
     }
 
+    assert!(image.gamut == UhdrColorGamut::Bt709);
+    assert!(image.transfer == UhdrColorTransfer::Srgb);
+
     RawImage::from_data(
         image.width,
         image.height,
