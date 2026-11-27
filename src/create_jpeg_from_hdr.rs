@@ -1,14 +1,15 @@
 use crate::decode_hif2rgb444::decode_heif2rgb_o_domain;
 
+use std::time::Instant;
+use std::path::PathBuf;
 
 use crate::color_spaces::rgb_to_xyz_wide16;
 use crate::color_spaces::xyz_to_rgb_wide16;
 use crate::simd_multiply::mul_vec_scalar_new_wide16;
 use crate::yuv_prime::{xyz_to_yuvprime_wide16, yuvprime_to_xyz_wide16};
 
-use crate::create_jpeg_from_2_files::encode_my_zen;
+use crate::create_jpeg_from_2_files::encodemy_zen;
 use crate::hlg::{hlg_oetf_wide16, hlg_eotf_wide16};
-use std::path::PathBuf;
 use image::{DynamicImage, ImageResult};
 
 fn add_suffix(path: &PathBuf, suffix: &str, new_ext:&str) -> PathBuf {
@@ -30,10 +31,12 @@ fn add_suffix(path: &PathBuf, suffix: &str, new_ext:&str) -> PathBuf {
 
 pub(crate) fn create_hdr_from_file(
     file: &PathBuf,
-    create_gainmapped_jpg: bool,
-) -> ImageResult<DynamicImage> {
-    let gain_hdr = 1.0;
-    let gain_sdr = 1.0;
+    gain_hdr : f32,
+    gain_sdr : f32,
+    to_file:  &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let total_start = Instant::now();
+    println!("Hello, world!");
 
     //let (width, height, r,g,b ) = decode_heif2rgb_e_domain("A6701459.HIF")?;
     //let _ = create_png("tmp2.png", width, height, &*r, &*g, &*b);
@@ -65,11 +68,11 @@ pub(crate) fn create_hdr_from_file(
     let (r_sdr, g_sdr, b_sdr) = xyz_to_rgb_wide16(&xxsdr, &yysdr, &zzsdr);
     let (r_hdr, g_hdr, b_hdr) = xyz_to_rgb_wide16(&xxhdr, &yyhdr, &zzhdr);
 
-    let to_file = add_suffix(&file,"_gainmapped", "jpg");
+    encodemy_zen(
+        to_file, width, height, &r_hdr, &g_hdr, &b_hdr, &r_sdr, &g_sdr, &b_sdr,
+    );
 
-    encode_my_zen(
-        &to_file, width, height, &r_hdr, &g_hdr, &b_hdr, &r_sdr, &g_sdr, &b_sdr,
-        create_gainmapped_jpg,
-    )
-
+    let total = total_start.elapsed();
+    println!("Total pipeline time: {:.3?}", total);
+    Ok(())
 }
