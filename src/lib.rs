@@ -22,6 +22,8 @@ pub mod pq;
 pub mod raw_image_transforms;
 pub mod decode_gainmapped_jpg;
 
+use egui::{Color32, RichText};
+
 
 
 use eframe::epaint::tessellator::Path;
@@ -126,6 +128,21 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ui, |ui| {
+            ui.with_layout(
+                egui::Layout::right_to_left(egui::Align::TOP),
+                |ui| {
+                    if ui.add(
+                        egui::Button::new(
+                            egui::RichText::new("X")
+                                .color(egui::Color32::WHITE)
+                                .strong()
+                        )
+                            .fill(egui::Color32::RED)
+                    ).clicked() {
+                        ui.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                },
+            );
             ui.horizontal(|ui| {
                 ui.label("    ");
                 ui.label("Select a HIF, heif or jpg file to decode");
@@ -231,6 +248,21 @@ impl eframe::App for MyApp {
                     }
 
                     egui::CentralPanel::default().show(viewport_ctx, |ui| {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::TOP),
+                            |ui| {
+                                if ui.add(
+                                    egui::Button::new(
+                                        egui::RichText::new("X")
+                                            .color(egui::Color32::WHITE)
+                                            .strong()
+                                    )
+                                        .fill(egui::Color32::RED)
+                                ).clicked() {
+                                    ui.send_viewport_cmd(egui::ViewportCommand::Close);
+                                }
+                            },
+                        );
                         if let (Some(texture), Some(size)) = (&self.image_texture, self.image_size) {
                             // Fit the picture inside the popup while preserving its aspect ratio.
                             let available = ui.available_size();
