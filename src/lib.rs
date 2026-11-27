@@ -45,34 +45,38 @@ use create_jpeg_from_hdr::{create_hdr_from_file, add_suffix, CreatedJpeg };
 
 use decode_gainmapped_jpg::decode_file;
 
+#[cfg(target_os = "android")]
+jni::bind_java_type! {
+    Activity => "android.app.Activity"
+}
 
 use robius_file_picker::{FileDialog, LocalFile};
-
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
-    // Log to android output
-    // while robius-file-picker needs the NativeActivity to launch its fragment.
-// The current Slint Android backend stores an Application in ndk-context,
-    // while robius-file-picker needs the NativeActivity to launch its fragment.
+    // robius-file-picker needs the NativeActivity to launch its fragment.
     unsafe { robius_android_env::set_activity_ptr(app.activity_as_ptr()) };
+
+    let app_for_ui = app.clone();
+
     let options = eframe::NativeOptions {
         android_app: Some(app),
         viewport: egui::ViewportBuilder::default().with_inner_size([620.0, 880.0]),
         ..Default::default()
     };
+
     eframe::run_native(
         "My egui App",
         options,
-        Box::new(|cc|{
+        Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Ok(Box::<MyApp>::default())
+
+            let mut my_app = MyApp::default();
+            my_app.android_app = Some(app_for_ui);
+            Ok(Box::new(my_app))
         }),
     );
-
 }
-
-
 
 pub struct MyApp {
     picked_path: Option<LocalFile>,
@@ -86,6 +90,9 @@ pub struct MyApp {
     loading: bool,
     gain_mapped_jpeg : Option<Vec<u8>>,
     create_gainmapped_jpg: bool,
+
+    #[cfg(target_os = "android")]
+    android_app: Option<winit::platform::android::activity::AndroidApp>,
 
 }
 
@@ -105,7 +112,10 @@ impl Default for MyApp {
             loading: false,
             gain_mapped_jpeg: None,
             create_gainmapped_jpg: false,
+            #[cfg(target_os = "android")]
+            android_app: None,
         }
+
     }
 }
 
@@ -113,7 +123,7 @@ impl Default for MyApp {
 impl MyApp {
     pub fn new(cc: &CreationContext) -> Self {
         egui_extras::install_image_loaders(&cc.egui_ctx);
-       let (path_tx, path_rx) = mpsc::channel();
+        let (path_tx, path_rx) = mpsc::channel();
         Self {
             spin: false,
             picked_path :None,
@@ -126,6 +136,8 @@ impl MyApp {
             loading : false,
             gain_mapped_jpeg : None,
             create_gainmapped_jpg : false,
+            #[cfg(target_os = "android")]
+            android_app: None,
         }
     }
 }
@@ -142,16 +154,16 @@ impl eframe::App for MyApp {
                 egui::Layout::right_to_left(egui::Align::TOP),
                 |ui| {
                     if ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("X")
-                                .color(egui::Color32::WHITE)
-                                .strong()
-                        )
+                        egui::Button::new("X")
                             .fill(egui::Color32::RED)
                     ).clicked() {
+                        #[cfg(target_os = "android")]
+                        if let Some(app) = self.android_app.clone() {
+                            background_android_task(app);
+                        }
 
-                        ui.send_viewport_cmd(egui::ViewportCommand::Close);
-
+                        #[cfg(not(target_os = "android"))]
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 },
             );
@@ -159,7 +171,7 @@ impl eframe::App for MyApp {
                 ui.label("    ");
                 ui.label("Select a HIF, heif or jpg file to decode");
             });
-           
+
             if ui.button("Open file…").clicked()
             {   self.spin = true;
                 let tx = self.path_tx.clone();
@@ -227,14 +239,14 @@ impl eframe::App for MyApp {
                                 .expect("Unable to decode HIF file");
 
                             if choose_file{
-                                    let newname = add_suffix(&path, "_gainmapped", ".jpg");
-                                    if let Err(err) = std::fs::write(&newname, &struc_result.jpeg) {
-                                        eprintln!("Could not write JPEG: {err}");
-                                    } else if let Err(err) = FileDialog::new().save_to_downloads(&newname, |result| {
-                                        println!("Saved file: {result:?}");
-                                    }) {
-                                        eprintln!("Could not start save to Downloads: {err}");
-                                    }
+                                let newname = add_suffix(&path, "_gainmapped", ".jpg");
+                                if let Err(err) = std::fs::write(&newname, &struc_result.jpeg) {
+                                    eprintln!("Could not write JPEG: {err}");
+                                } else if let Err(err) = FileDialog::new().save_to_downloads(&newname, |result| {
+                                    println!("Saved file: {result:?}");
+                                }) {
+                                    eprintln!("Could not start save to Downloads: {err}");
+                                }
                             }else{
                                 eprintln!("Not Printing");
                             }
@@ -300,7 +312,7 @@ impl eframe::App for MyApp {
                                         .fill(egui::Color32::RED)
                                 ).clicked() {
                                     self.image_popup_open = false;
-                                    
+
                                 }
                             },
                         );
@@ -316,7 +328,7 @@ impl eframe::App for MyApp {
                 });
             }else{
                 self.picked_path = None;
-               
+
             }
 
 
@@ -338,37 +350,41 @@ impl eframe::App for MyApp {
 }
 
 #[cfg(target_os = "android")]
-use std::mem::ManuallyDrop;
 
 #[cfg(target_os = "android")]
-fn finish_android_task(app: winit::platform::android::activity::AndroidApp) {
+fn background_android_task(
+    app: winit::platform::android::activity::AndroidApp,
+) {
     let callback_app = app.clone();
 
     app.run_on_java_main_thread(Box::new(move || {
         let vm = unsafe {
             jni::JavaVM::from_raw(callback_app.vm_as_ptr().cast())
-        }
-            .expect("Could not get Java VM");
+        };
 
-        let activity_ptr = callback_app.activity_as_ptr()
-            as jni::sys::jobject;
+        let activity_ptr =
+            callback_app.activity_as_ptr() as jni::sys::jobject;
 
-        let mut env = vm
-            .attach_current_thread()
-            .expect("Could not attach to Java VM");
+        let result = vm.attach_current_thread(
+            |env| -> jni::errors::Result<()> {
+                // This is an AndroidApp-owned global reference.
+                let activity = unsafe {
+                    env.as_cast_raw::<jni::refs::Global<Activity>>(&activity_ptr)?
+                };
 
-        // AndroidApp owns this global reference; don't delete it here.
-        let activity = ManuallyDrop::new(unsafe {
-            jni::objects::JObject::from_raw(activity_ptr)
-        });
+                env.call_method(
+                    activity.as_ref(),
+                    jni::jni_str!("moveTaskToBack"),
+                    jni::jni_sig!((non_root: jboolean) -> jboolean),
+                    &[jni::objects::JValue::Bool(true)],
+                )?;
 
-        if let Err(err) = env.call_method(
-            &*activity,
-            "finishAndRemoveTask",
-            "()V",
-            &[],
-        ) {
-            eprintln!("Could not close Android task: {err}");
+                Ok(())
+            },
+        );
+
+        if let Err(err) = result {
+            eprintln!("Could not move app to background: {err}");
         }
     }));
 }
