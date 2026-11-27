@@ -930,6 +930,7 @@ dependencies = [
  "half",
  "heic-decoder",
  "image",
+ "jni 0.21.1",
  "oxideav-pixfmt",
  "robius-android-env",
  "robius-file-picker",

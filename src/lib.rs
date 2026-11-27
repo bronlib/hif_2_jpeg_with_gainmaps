@@ -134,6 +134,10 @@ impl MyApp {
 impl eframe::App for MyApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("    ");
+                ui.label("   ");
+            });
             ui.with_layout(
                 egui::Layout::right_to_left(egui::Align::TOP),
                 |ui| {
@@ -145,7 +149,9 @@ impl eframe::App for MyApp {
                         )
                             .fill(egui::Color32::RED)
                     ).clicked() {
+
                         ui.send_viewport_cmd(egui::ViewportCommand::Close);
+
                     }
                 },
             );
@@ -293,7 +299,8 @@ impl eframe::App for MyApp {
                                     )
                                         .fill(egui::Color32::RED)
                                 ).clicked() {
-                                    ui.send_viewport_cmd(egui::ViewportCommand::Close);
+                                    self.image_popup_open = false;
+                                    
                                 }
                             },
                         );
@@ -328,4 +335,40 @@ impl eframe::App for MyApp {
 
 
     }
+}
+
+#[cfg(target_os = "android")]
+use std::mem::ManuallyDrop;
+
+#[cfg(target_os = "android")]
+fn finish_android_task(app: winit::platform::android::activity::AndroidApp) {
+    let callback_app = app.clone();
+
+    app.run_on_java_main_thread(Box::new(move || {
+        let vm = unsafe {
+            jni::JavaVM::from_raw(callback_app.vm_as_ptr().cast())
+        }
+            .expect("Could not get Java VM");
+
+        let activity_ptr = callback_app.activity_as_ptr()
+            as jni::sys::jobject;
+
+        let mut env = vm
+            .attach_current_thread()
+            .expect("Could not attach to Java VM");
+
+        // AndroidApp owns this global reference; don't delete it here.
+        let activity = ManuallyDrop::new(unsafe {
+            jni::objects::JObject::from_raw(activity_ptr)
+        });
+
+        if let Err(err) = env.call_method(
+            &*activity,
+            "finishAndRemoveTask",
+            "()V",
+            &[],
+        ) {
+            eprintln!("Could not close Android task: {err}");
+        }
+    }));
 }
