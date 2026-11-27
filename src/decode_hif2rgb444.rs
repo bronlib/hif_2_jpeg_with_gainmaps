@@ -20,6 +20,12 @@ use image::{DynamicImage};
 
 use crate::create_jpeg_from_2_files::rgba32f_to_rgb8;
 
+
+
+pub struct CreatedJpeg{
+    preview : DynamicImage,
+    jpeg : Vec<u8>,
+}
 //use crate::decode_gainmapped_jpg::DecodedJpeg;
 
 pub (crate) fn decode_heif2img( name: &PathBuf)->Result<DynamicImage, String>{

@@ -20,6 +20,8 @@ use crate::transfer_functions::apply_transfer;
 use oxideav_pixfmt::transfer::{ bt1886_inverse_eotf};
 use zenjpeg::decoder::{ Decoder};
 
+use crate::create_jpeg_from_hdr::CreatedJpeg;
+
 struct MyStop {
     stop: bool,
 }
@@ -73,27 +75,24 @@ fn get_pixels_rgb32f(file: &Path) -> UhdrRawImage {
 pub(crate) fn create_from_2_files(
     hdr_file: &Path,
     sdr_file: &Path,
-    to_file: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<CreatedJpeg, String> {
     println!(
-        "create_from_2_file {:?}, {:?} to file {:?}",
-        hdr_file.to_str(), sdr_file.to_str(), to_file.to_str()
+        "create_from_2_file {:?}, {:?} ",
+        hdr_file.to_str(), sdr_file.to_str()
     );
 
     let hdr = get_pixels_rgb32f(hdr_file);
     let sdr = get_pixels_rgb32f(sdr_file);
 
-    create_from_2_raw(hdr, sdr, to_file)?;
-    Ok(())
+    create_from_2_raw(hdr, sdr)
 }
 
 pub(crate) fn create_from_2_raw(
     hdr: RawImage,
     sdr: RawImage,
-    to_file: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<CreatedJpeg, String> {
     let total_start = Instant::now();
-    println!("create_from_2_raw : to file {:?}", to_file.to_str());
+   
     assert_eq!(sdr.gamut, UhdrColorGamut::Bt2020);
     /*
     Reduce the gammut so that the gainmap will include the
@@ -150,12 +149,27 @@ pub(crate) fn create_from_2_raw(
     // Keep XMP as the encoder format for browser compatibility, then add the
     // standards-based ISO 21496-1 APP2 blocks using the exact same metadata.
     let alternate_space_icc = linear_bt2020_icc_profile();
-    let sdr_jpeg = add_iso21496_to_xmp_ultrahdr(&sdr_jpeg, &metadata, &alternate_space_icc)?;
+    let jpeg = add_iso21496_to_xmp_ultrahdr(&sdr_jpeg, &metadata, &alternate_space_icc)?;
 
-     if  to_file.is_empty()==false {
-         std::fs::write(&to_file, &sdr_jpeg).unwrap();
-     }
+    let raw: RawImage = sdr_8;
 
+    let rgb = image::RgbImage::from_raw(raw.width, raw.height, raw.data)
+        .ok_or_else(|| {
+            image::ImageError::Parameter(image::error::ParameterError::from_kind(
+                image::error::ParameterErrorKind::DimensionMismatch,
+            ))
+        }).unwrap();
+    
+    let preview =  image::DynamicImage::ImageRgb8(rgb);
+   
+    let total = total_start.elapsed();
+    println!("Total pipeline time: {:.3?}", total);
+    
+    Ok(CreatedJpeg{
+        jpeg,
+        preview,
+    })
+/*
     let rgb = gainmap.data;
     let width = gainmap.width;
     let height = gainmap.height;
@@ -179,9 +193,10 @@ pub(crate) fn create_from_2_raw(
     )
     .unwrap();
 
-    let total = total_start.elapsed();
-    println!("Total pipeline time: {:.3?}", total);
-    Ok(())
+    
+    Ok(()
+    
+ */
 }
 
 /// Pack f32 RGB → RGBA32F → Vec<u8> (for ultrahdr-rs 0.3.5)
@@ -200,7 +215,6 @@ fn pack_rgba32f_bytes(r: &[f32], g: &[f32], b: &[f32]) -> Vec<u8> {
 }
 
 pub(crate) fn encodemy_zen(
-    to_file: &Path,
     width: usize,
     height: usize,
     r_hdr: &[f32],
@@ -209,8 +223,8 @@ pub(crate) fn encodemy_zen(
     r_sdr: &[f32],
     g_sdr: &[f32],
     b_sdr: &[f32],
-) {
-    println!("Encoding Zen to file : {:?}", to_file.to_str());
+) -> Result<CreatedJpeg, String>{
+    
     let hdr_vec = pack_rgba32f_bytes(r_hdr, g_hdr, b_hdr);
     let sdr_vec = pack_rgba32f_bytes(r_sdr, g_sdr, b_sdr);
 
@@ -237,7 +251,7 @@ pub(crate) fn encodemy_zen(
     )
     .unwrap();
 
-    create_from_2_raw(hdr, sdr, &to_file).unwrap();
+    create_from_2_raw(hdr, sdr)
 }
 
 pub(crate) fn rgba32f_to_rgb8(image: &RawImage) -> RawImage {

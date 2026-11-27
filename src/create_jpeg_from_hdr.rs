@@ -12,7 +12,7 @@ use crate::create_jpeg_from_2_files::encodemy_zen;
 use crate::hlg::{hlg_oetf_wide16, hlg_eotf_wide16};
 use image::{DynamicImage, ImageResult};
 
-fn add_suffix(path: &PathBuf, suffix: &str, new_ext:&str) -> PathBuf {
+pub fn add_suffix(path: &PathBuf, suffix: &str, new_ext:&str) -> PathBuf {
     let stem = path.file_stem()
         .unwrap_or_default()
         .to_string_lossy();
@@ -29,17 +29,18 @@ fn add_suffix(path: &PathBuf, suffix: &str, new_ext:&str) -> PathBuf {
 }
 
 
+pub struct CreatedJpeg{
+    pub preview : DynamicImage,
+    pub jpeg : Vec<u8>,
+}
+
 pub(crate) fn create_hdr_from_file(
     file: &PathBuf,
     gain_hdr : f32,
     gain_sdr : f32,
-    to_file:  &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<CreatedJpeg, String>{
     let total_start = Instant::now();
     println!("Hello, world!");
-
-    //let (width, height, r,g,b ) = decode_heif2rgb_e_domain("A6701459.HIF")?;
-    //let _ = create_png("tmp2.png", width, height, &*r, &*g, &*b);
 
     let (width, height, r, g, b) = decode_heif2rgb_o_domain(file).unwrap();
 
@@ -68,11 +69,12 @@ pub(crate) fn create_hdr_from_file(
     let (r_sdr, g_sdr, b_sdr) = xyz_to_rgb_wide16(&xxsdr, &yysdr, &zzsdr);
     let (r_hdr, g_hdr, b_hdr) = xyz_to_rgb_wide16(&xxhdr, &yyhdr, &zzhdr);
 
-    encodemy_zen(
-        to_file, width, height, &r_hdr, &g_hdr, &b_hdr, &r_sdr, &g_sdr, &b_sdr,
-    );
-
     let total = total_start.elapsed();
     println!("Total pipeline time: {:.3?}", total);
-    Ok(())
+
+    encodemy_zen(
+        width, height, &r_hdr, &g_hdr, &b_hdr, &r_sdr, &g_sdr, &b_sdr,
+    )
+
+
 }

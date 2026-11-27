@@ -41,10 +41,10 @@ use std::{
 
 
 //use eframe::egui::{CentralPanel, ComboBox, Popup, PopupCloseBehavior};
-use create_jpeg_from_hdr::create_hdr_from_file;
+use create_jpeg_from_hdr::{create_hdr_from_file, add_suffix, CreatedJpeg };
 
 use decode_gainmapped_jpg::decode_file;
-use decode_hif2rgb444::decode_heif2img;
+
 
 use robius_file_picker::{FileDialog, LocalFile};
 
@@ -82,8 +82,10 @@ pub struct MyApp {
     image_popup_open: bool,
     image_texture: Option<egui::TextureHandle>,
     image_size: Option<egui::Vec2>,
-    image_rx: Option<Receiver<ImageBuffer<Rgba<u8>, Vec<u8>>>>,
+    image_rx: Option<Receiver<CreatedJpeg>>,
     loading: bool,
+    gain_mapped_jpeg : Option<Vec<u8>>,
+    create_gainmapped_jpg: bool,
 
 }
 
@@ -101,6 +103,8 @@ impl Default for MyApp {
             image_size: None,
             image_rx: None,
             loading: false,
+            gain_mapped_jpeg: None,
+            create_gainmapped_jpg: false,
         }
     }
 }
@@ -120,6 +124,8 @@ impl MyApp {
             image_size : Some(egui::vec2(0.0, 0.0)),
             image_rx : None,
             loading : false,
+            gain_mapped_jpeg : None,
+            create_gainmapped_jpg : false,
         }
     }
 }
@@ -165,6 +171,10 @@ impl eframe::App for MyApp {
                     })
                     .expect("failed to show file dialog");
             }
+            ui.checkbox(
+                &mut self.create_gainmapped_jpg,
+                "Create gainmapped JPG from the HIF file",
+            );
             while let Ok(file) = self.path_rx.try_recv() {
                 self.picked_path = Some(file);
                 self.spin = false;
@@ -187,23 +197,46 @@ impl eframe::App for MyApp {
                     let selected_file = selected_file.clone();
                     let path = selected_file.path().to_path_buf();
                     let (tx, rx) = mpsc::channel();
+                    let create_file = self.create_gainmapped_jpg.clone();
 
                     std::thread::spawn(move || {
                         let _keep_file_alive = selected_file;
-
+                        let choose_file = create_file;
                         let extension = path
                             .extension()
                             .and_then(|s| s.to_str())
                             .unwrap_or("")
                             .to_ascii_lowercase();
 
-                        let image = if ["jpeg", "jpg"].contains(&extension.as_str()) {
-                            decode_file(&path).expect("Unable to decode jpg file")
+                        let created_jpg = if ["jpeg", "jpg"].contains(&extension.as_str()) {
+
+                            let preview = decode_file(&path).expect("Unable to decode jpg file");
+                            let jpeg = vec![0u8; 0];
+                            CreatedJpeg{
+                                preview,
+                                jpeg,
+                            }
                         } else {
-                            decode_heif2img(&path).expect("Unable to decode HIF file")
+                            let  struc_result= create_hdr_from_file(&path, 1.0, 1.0)
+                                .expect("Unable to decode HIF file");
+
+                            if choose_file{
+                                    let newname = add_suffix(&path, "_gainmapped", ".jpg");
+                                    if let Err(err) = std::fs::write(&newname, &struc_result.jpeg) {
+                                        eprintln!("Could not write JPEG: {err}");
+                                    } else if let Err(err) = FileDialog::new().save_to_downloads(&newname, |result| {
+                                        println!("Saved file: {result:?}");
+                                    }) {
+                                        eprintln!("Could not start save to Downloads: {err}");
+                                    }
+                            }else{
+                                eprintln!("Not Printing");
+                            }
+                            struc_result
+
                         };
 
-                        let _ = tx.send(image.to_rgba8());
+                        let _ = tx.send(created_jpg);
                     });
 
                     self.image_rx = Some(rx);
@@ -212,7 +245,8 @@ impl eframe::App for MyApp {
             }
 
             if let Some(rx) = &self.image_rx {
-                if let Ok(image) = rx.try_recv() {
+                if let Ok(created_jpg) = rx.try_recv() {
+                    let image = created_jpg.preview.to_rgba8();
                     let size = [image.width() as usize, image.height() as usize];
                     println!("width={:?}, height={:?}", image.width(), image.height());
                     let repaint_ctx = ui.clone();
