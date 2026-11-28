@@ -1,0 +1,6 @@
+icon: "assets/Designer.png"
+
+android:
+  manifest:
+    application:
+      label: "HIF_2_JPG"

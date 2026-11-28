@@ -323,54 +323,76 @@ impl eframe::App for MyApp {
                             },
                         );
 
-                        if let (Some(texture), Some(size)) =
-                            (&self.image_texture, self.image_size)
-                        {
+                        if let (Some(texture), Some(size)) = (&self.image_texture, self.image_size) {
                             let available = ui.available_size();
+                            let rotate = size.x > size.y;
 
-                            // Fit image to window
-                            let fit_scale = (available.x / size.x)
-                                .min(available.y / size.y)
+                            // A 90° rotation swaps the image's displayed width and height.
+                            let oriented_size = if rotate {
+                                egui::vec2(size.y, size.x)
+                            } else {
+                                size
+                            };
+
+                            // Fit image to window.
+                            let fit_scale = (available.x / oriented_size.x)
+                                .min(available.y / oriented_size.y)
                                 .min(1.0);
 
-                            // Pinch zoom
+                            // Pinch zoom.
                             let zoom_delta = ui.input(|i| i.zoom_delta());
-
                             self.zoom = (self.zoom * zoom_delta).clamp(0.1, 20.0);
 
-                            let display_size = size * fit_scale * self.zoom;
+                            let display_size = oriented_size * fit_scale * self.zoom;
 
-                            // Allocate the visible window
+                            // Allocate the visible window.
                             let (rect, response) =
                                 ui.allocate_exact_size(available, egui::Sense::drag());
 
-                            // Drag image
+                            // Drag image.
                             if response.dragged() {
                                 self.image_offset += response.drag_delta();
                             }
 
-                            // Keep image centered when not panned
                             let center = rect.center() + self.image_offset;
-
-                            let image_rect = egui::Rect::from_center_size(
-                                center,
-                                display_size,
-                            );
-
-                            // Clip image to window
+                            let image_rect = egui::Rect::from_center_size(center, display_size);
                             let painter = ui.painter_at(rect);
 
-                            painter.image(
-                                texture.id(),
-                                image_rect,
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                ),
-                                egui::Color32::WHITE,
-                            );
-                        }
+                            // Draw a textured quad, rotating its UV coordinates for landscape images.
+                            let mut mesh = egui::epaint::Mesh::with_texture(texture.id());
 
+                            let (uv_tl, uv_tr, uv_br, uv_bl) = if rotate {
+                                (
+                                    egui::pos2(0.0, 1.0),
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                )
+                            } else {
+                                (
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                    egui::pos2(0.0, 1.0),
+                                )
+                            };
+
+                            let vertex = |pos, uv| egui::epaint::Vertex {
+                                pos,
+                                uv,
+                                color: egui::Color32::WHITE,
+                            };
+
+                            mesh.vertices.extend_from_slice(&[
+                                vertex(image_rect.left_top(), uv_tl),
+                                vertex(image_rect.right_top(), uv_tr),
+                                vertex(image_rect.right_bottom(), uv_br),
+                                vertex(image_rect.left_bottom(), uv_bl),
+                            ]);
+                            mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+
+                            painter.add(egui::Shape::mesh(mesh));
+                        }
                     });
                 });
             }else{
