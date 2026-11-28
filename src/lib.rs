@@ -90,6 +90,8 @@ pub struct MyApp {
     loading: bool,
     gain_mapped_jpeg : Option<Vec<u8>>,
     create_gainmapped_jpg: bool,
+    zoom: f32,
+    image_offset: egui::Vec2,
 
     #[cfg(target_os = "android")]
     android_app: Option<winit::platform::android::activity::AndroidApp>,
@@ -112,6 +114,8 @@ impl Default for MyApp {
             loading: false,
             gain_mapped_jpeg: None,
             create_gainmapped_jpg: false,
+            zoom: 1.0,
+            image_offset: egui::vec2(0.0, 0.0),
             #[cfg(target_os = "android")]
             android_app: None,
         }
@@ -136,6 +140,8 @@ impl MyApp {
             loading : false,
             gain_mapped_jpeg : None,
             create_gainmapped_jpg : false,
+            zoom: 1.0,
+            image_offset: egui::vec2(0.0, 0.0),
             #[cfg(target_os = "android")]
             android_app: None,
         }
@@ -316,14 +322,55 @@ impl eframe::App for MyApp {
                                 }
                             },
                         );
-                        if let (Some(texture), Some(size)) = (&self.image_texture, self.image_size) {
-                            // Fit the picture inside the popup while preserving its aspect ratio.
+
+                        if let (Some(texture), Some(size)) =
+                            (&self.image_texture, self.image_size)
+                        {
                             let available = ui.available_size();
-                            let scale = (available.x / size.x).min(available.y / size.y).min(1.0);
-                            ui.centered_and_justified(|ui| {
-                                ui.image((texture.id(), size * scale));
-                            });
+
+                            // Fit image to window
+                            let fit_scale = (available.x / size.x)
+                                .min(available.y / size.y)
+                                .min(1.0);
+
+                            // Pinch zoom
+                            let zoom_delta = ui.input(|i| i.zoom_delta());
+
+                            self.zoom = (self.zoom * zoom_delta).clamp(0.1, 20.0);
+
+                            let display_size = size * fit_scale * self.zoom;
+
+                            // Allocate the visible window
+                            let (rect, response) =
+                                ui.allocate_exact_size(available, egui::Sense::drag());
+
+                            // Drag image
+                            if response.dragged() {
+                                self.image_offset += response.drag_delta();
+                            }
+
+                            // Keep image centered when not panned
+                            let center = rect.center() + self.image_offset;
+
+                            let image_rect = egui::Rect::from_center_size(
+                                center,
+                                display_size,
+                            );
+
+                            // Clip image to window
+                            let painter = ui.painter_at(rect);
+
+                            painter.image(
+                                texture.id(),
+                                image_rect,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
+                                egui::Color32::WHITE,
+                            );
                         }
+
                     });
                 });
             }else{
